@@ -1,6 +1,16 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { Search, MapPin, CalendarDays, Heart, ArrowRight, ChevronLeft, ChevronRight, ShieldCheck, Headphones, Tag, Sparkles, Mail, Menu, X, Star, Ticket, Building2, Smartphone, Music2, PartyPopper, Gem, BriefcaseBusiness, Trophy, TentTree, Mic2, Store, Play, Users, Gift, House } from 'lucide-react';
+import { AuthProvider } from './context/AuthContext.jsx';
+import AuthPage from './pages/auth/AuthPage.jsx';
+import CatalogPage, { Topbar } from './pages/public/CatalogPage.jsx';
+import DashboardPage from './pages/DashboardPage.jsx';
+import SiteFooter from './components/SiteFooter.jsx';
+import VenuesPage from './pages/public/VenuesPage.jsx';
+import OrganizePage from './pages/public/OrganizePage.jsx';
+import ListVenuePage from './pages/public/ListVenuePage.jsx';
+import { eventCategories } from './data/eventCategories.js';
 import './styles.css';
 
 const img = {
@@ -28,10 +38,7 @@ const heroCopy = [
   {kicker:'HONOUR TRADITION',kickerAccent:'WITH JOY',lines:[['Celebrate Your ','Culture'],['Create Lasting ',null],['','Memories']],description:'Find beautiful spaces for cultural festivities, family traditions and joyful community gatherings.'}
 ];
 
-const categories = [
-  ['Concerts', '/images/concert.png'], ['Parties', '/images/party.png'], ['Weddings', '/images/wedding.png'], ['Business Events', '/images/business.png'],
-  ['Sports', '/images/sports.png'], ['Festivals', '/images/festival.png'], ['Workshops', '/images/workshop.png'], ['Exhibitions', '/images/expoo.png']
-];
+const categories = eventCategories.map(({name,image})=>[name,image]);
 
 const events = [
   {image: img.event1, day:'15', mon:'Nov', type:'Concert', title:'Arijit Singh Live in Concert', city:'Chennai', place:'Nehru Indoor Stadium', price:'₹999'},
@@ -51,8 +58,8 @@ function Logo({light=false}) { return <a className={`logo ${light?'light':''}`} 
 
 function Header(){
   const [open,setOpen]=React.useState(false);
-  const links=[['Home',House],['Events',CalendarDays],['Venues',MapPin],['Organize Event',Users],['List Your Venue',Store]];
-  return <header className="header wrap"><Logo/><nav className={open?'open':''}>{links.map(([n,I],i)=><a className={i===0?'active':''} href={`#${n.toLowerCase().replaceAll(' ','-')}`} key={n}><I aria-hidden="true"/><span>{n}</span></a>)}</nav><div className="header-actions"><button className="btn ghost">Login</button><button className="btn primary">Sign Up <ArrowRight/></button><button className="menu" onClick={()=>setOpen(!open)} aria-label="Menu">{open?<X/>:<Menu/>}</button></div></header>
+  const links=[['Home',House,'#home'],['Events',CalendarDays,'/discover'],['Venues',MapPin,'#venues'],['Organize Event',Users,'#organize-event'],['List Your Venue',Store,'#list-your-venue']];
+  return <header className="header wrap"><Logo/><nav className={open?'open':''}>{links.map(([n,I,to],i)=>to.startsWith('/')?<Link className={i===0?'active':''} to={to} onClick={()=>setOpen(false)} key={n}><I aria-hidden="true"/><span>{n}</span></Link>:<a className={i===0?'active':''} href={to} onClick={()=>setOpen(false)} key={n}><I aria-hidden="true"/><span>{n}</span></a>)}</nav><div className="header-actions"><Link className="btn ghost" to="/auth/login">Login</Link><Link className="btn primary" to="/auth/register">Sign Up <ArrowRight/></Link><button className="menu" onClick={()=>setOpen(!open)} aria-label="Menu">{open?<X/>:<Menu/>}</button></div></header>
 }
 
 function Hero(){
@@ -62,12 +69,14 @@ function Hero(){
     return ()=>window.clearInterval(timer);
   },[]);
   const copy=heroCopy[activeSlide];
-  return <section className={`hero hero-skin-${activeSlide}`} id="home"><Header/><div className="hero-art" aria-hidden="true">{heroSlides.map((src,i)=><div className={`hero-slide ${i===activeSlide?'active':''}`} style={{backgroundImage:`url(${src})`}} key={src}/>)}</div><div className="hero-content wrap"><div className={`hero-copy hero-theme-${activeSlide}`} key={activeSlide}><p className="eyebrow">{copy.kicker} <span>{copy.kickerAccent}</span></p><h1>{copy.lines.map(([text,accent],i)=><React.Fragment key={`${text}-${accent}`}><span className="hero-copy-line">{text}{accent&&<em className={`hero-keyword keyword-${i+1}`}>{accent}</em>}</span>{i<copy.lines.length-1&&<br/>}</React.Fragment>)}</h1><p className="lead">{copy.description}</p></div></div><div className="story"><button><Play fill="currentColor"/></button><span>Watch<br/>Our Story</span></div><SearchPanel/></section>
+  return <section className={`hero hero-skin-${activeSlide}`} id="home"><Topbar home/><div className="hero-art" aria-hidden="true">{heroSlides.map((src,i)=><div className={`hero-slide ${i===activeSlide?'active':''}`} style={{backgroundImage:`url(${src})`}} key={src}/>)}</div><div className="hero-content wrap"><div className={`hero-copy hero-theme-${activeSlide}`} key={activeSlide}><p className="eyebrow">{copy.kicker} <span>{copy.kickerAccent}</span></p><h1>{copy.lines.map(([text,accent],i)=><React.Fragment key={`${text}-${accent}`}><span className="hero-copy-line">{text}{accent&&<em className={`hero-keyword keyword-${i+1}`}>{accent}</em>}</span>{i<copy.lines.length-1&&<br/>}</React.Fragment>)}</h1><p className="lead">{copy.description}</p></div></div><div className="story"><button><Play fill="currentColor"/></button><span>Watch<br/>Our Story</span></div><SearchPanel/></section>
 }
 
-function SearchPanel(){const [tab,setTab]=React.useState('Events'); return <div className="search-wrap wrap"><div className="tabs"><button className={tab==='Events'?'active':''} onClick={()=>setTab('Events')}>Events</button><button className={tab==='Venues'?'active':''} onClick={()=>setTab('Venues')}>Venues</button></div><div className="search-panel"><label><Search/><input placeholder={tab==='Events'?'Search events, artists, venues...':'Search venues by name or type...'}/></label><label><MapPin/><input placeholder="Select Location"/></label><label><CalendarDays/><input placeholder="Select Date"/></label><button aria-label="Submit search"><Search/></button></div><div className="popular"><b>Popular Searches:</b>{['Concerts','Weddings','Parties','Birthday','Business Events','Festivals','Exhibitions'].map(x=><span key={x}>{x}</span>)}</div></div>}
+function SearchPanel(){const [tab,setTab]=React.useState('Events'); const navigate=useNavigate(); const submit=e=>{e.preventDefault();const data=new FormData(e.currentTarget);const params=new URLSearchParams({type:tab.toLowerCase()});for(const [key,value] of data)if(value)params.set(key,value);navigate(`/discover?${params}`)}; return <div className="search-wrap wrap"><div className="tabs"><button className={tab==='Events'?'active':''} onClick={()=>setTab('Events')}>Events</button><button className={tab==='Venues'?'active':''} onClick={()=>setTab('Venues')}>Venues</button></div><form className="search-panel" onSubmit={submit}><label><Search/><input name="q" placeholder={tab==='Events'?'Try “Music events in Salem”':'Search venues by name or type...'}/></label><label><MapPin/><input name="location" placeholder="Select Location"/></label><label><CalendarDays/><input name="date" type="date" aria-label="Select Date"/></label><button aria-label="Submit search"><Search/></button></form><div className="popular"><b>Popular Searches:</b>{['Music','Cricket','Workshops','Networking','Kids events','Food festivals','Cultural programs'].map(x=><button type="button" key={x} onClick={()=>navigate(`/discover?type=${tab.toLowerCase()}&q=${encodeURIComponent(x)}`)}>{x}</button>)}</div></div>}
 
-function Categories(){return <section className="categories wrap" aria-label="Event categories"><div className="categories-track">{[...categories,...categories].map(([name,image],i)=>{const duplicate=i>=categories.length;return <a href="#events" key={`${name}-${i}`} aria-hidden={duplicate||undefined} tabIndex={duplicate?-1:undefined}><span className="category-sparkles" aria-hidden="true"><small>✦</small><small>✦</small></span><i className={`cat c${i%categories.length}`}><img src={image} alt={duplicate?'':name}/></i><b>{name}</b></a>})}</div></section>}
+function Categories(){return <section className="categories wrap" aria-label="Event categories"><div className="categories-track">{[...categories,...categories].map(([name,image],i)=>{const duplicate=i>=categories.length;return <Link to={`/discover?type=events&category=${encodeURIComponent(name)}`} key={`${name}-${i}`} aria-hidden={duplicate||undefined} tabIndex={duplicate?-1:undefined}><span className="category-sparkles" aria-hidden="true"><small>✦</small><small>✦</small></span><i className={`cat c${i%categories.length}`}><img src={image} alt={duplicate?'':name}/></i><b>{name}</b></Link>})}</div></section>}
+
+function CategoryDirectory(){const navigate=useNavigate();return <section className="category-directory wrap" aria-labelledby="category-directory-title"><div className="category-directory-heading"><p className="eyebrow">EXPLORE YOUR INTERESTS</p><h2 id="category-directory-title">Browse Events by Category</h2><p>Search by event name, category, location, organizer, or venue.</p></div><div className="category-groups">{eventCategories.map(group=><article key={group.name}><div className="category-group-title"><img src={group.image} alt=""/><h3>{group.name}</h3></div><div className="subcategory-list">{group.subcategories.map(item=><button key={item} onClick={()=>navigate(`/discover?type=events&category=${encodeURIComponent(group.name)}&subcategory=${encodeURIComponent(item)}`)}>{item}</button>)}</div></article>)}</div><button className="category-example" onClick={()=>navigate('/discover?type=events&q=Music%20events%20in%20Salem')}><Search/> Try: “Music events in Salem” <ArrowRight/></button></section>}
 
 function SectionTitle({kicker,title,accent,desc}){return <div className="section-heading"><div><p className="eyebrow">{kicker}</p><h2>{title} <em>{accent}</em></h2>{desc&&<p>{desc}</p>}</div><a href="#">View All {kicker.includes('VENUE')?'Venues':'Events'} <ArrowRight/></a></div>}
 function CarouselButtons(){return <div className="carousel-buttons"><button aria-label="Previous"><ChevronLeft/></button><button aria-label="Next"><ChevronRight/></button></div>}
@@ -90,8 +99,11 @@ function Testimonials(){return <section className="testimonials wrap"><p classNa
 
 function CTA(){return <><section className="dual-cta wrap"><article className="organizer"><img className="cta-photo" src={img.why} alt="Live event stage and audience"/><div className="cta-shade"/><i><Ticket/></i><div className="cta-content"><h3>Are You an Event Organizer?</h3><p>Reach more people, sell tickets online and manage your events with ease.</p><button className="btn white">Create an Event <ArrowRight/></button></div></article><article className="venue-cta"><img className="cta-photo" src={img.venue1} alt="Elegant event venue"/><div className="cta-shade"/><i><Building2/></i><div className="cta-content"><h3>List Your Venue</h3><p>Showcase your venue to thousands of event planners and customers.</p><button className="btn dark">List Your Venue <ArrowRight/></button></div></article></section><section className="newsletter wrap"><i><Mail/></i><div><small>Stay Updated</small><h3>Get the Latest Events & Offers</h3><p>Subscribe to our newsletter and never miss an amazing event or deal.</p></div><form onSubmit={e=>e.preventDefault()}><input type="email" aria-label="Email" placeholder="Enter your email address"/><button>Subscribe <ArrowRight/></button></form></section></>}
 
-function Footer(){return <footer><div className="wrap footer-grid"><div><Logo light/><p>Discover amazing events and venues for every occasion. Making celebrations easier, one booking at a time.</p><div className="social"><span>f</span><span>◎</span><span>𝕏</span><span>▶</span><span>in</span></div></div>{[['Quick Links','Home','Events','Venues','Organize Event','List Your Venue'],['Support','Help Center','Contact Us','Booking Guide','Terms & Conditions','Privacy Policy'],['For Organizers','Create an Event','Manage Events','Pricing','Organizer Guide'],['For Venue Owners','List Your Venue','Venue Partner Program','Commission & Fees','Venue Guidelines']].map(g=><div className="footer-links" key={g[0]}><b>{g[0]}</b>{g.slice(1).map(x=><a href="#" key={x}>{x}</a>)}</div>)}</div><div className="copyright wrap"><span>© 2026 Eventoria. All rights reserved.</span><span>Made with <em>♥</em> for unforgettable moments</span></div></footer>}
+function Footer(){return <SiteFooter/>}
 
-function App(){return <><Hero/><Categories/><Listings/><Why/><Wedding/><Testimonials/><CTA/><Footer/></>}
+function HomePage(){return <><Hero/><Categories/><Listings/><Why/><Wedding/><Testimonials/><CTA/><Footer/></>}
 
-createRoot(document.getElementById('root')).render(<App/>);
+export function App(){return <Routes><Route path="/" element={<HomePage/>}/><Route path="/discover" element={<CatalogPage/>}/><Route path="/venues" element={<VenuesPage/>}/><Route path="/organize" element={<OrganizePage/>}/><Route path="/list-venue" element={<ListVenuePage/>}/><Route path="/auth/:mode" element={<AuthPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/><Route path="*" element={<main className="state-message"><h1>Page not found</h1><Link to="/">Return home</Link></main>}/></Routes>}
+
+const rootElement=document.getElementById('root');
+if(rootElement) createRoot(rootElement).render(<BrowserRouter><AuthProvider><App/></AuthProvider></BrowserRouter>);
