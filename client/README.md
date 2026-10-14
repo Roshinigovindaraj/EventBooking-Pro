@@ -9,11 +9,11 @@ Requirements: Node.js 20+ and MongoDB (a replica set is recommended because tick
 ```powershell
 npm install
 Copy-Item .env.example .env
-npm --prefix server install
-Copy-Item server\.env.example server\.env
+npm --prefix ../server install
+Copy-Item ..\server\.env.example ..\server\.env
 ```
 
-Replace the example secrets in `server/.env` with two different cryptographically random values of at least 32 characters. Never commit `.env`.
+Replace the example secrets in `../server/.env` with two different cryptographically random values of at least 32 characters. Never commit `.env`.
 
 Run the applications in separate terminals:
 
@@ -32,7 +32,7 @@ npm test
 npm run build
 npm run server:test
 npm audit --omit=dev
-npm --prefix server audit --omit=dev
+npm --prefix ../server audit --omit=dev
 ```
 
 ## Security model

@@ -6,7 +6,10 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(5000),
   MONGODB_URI: z.string().min(1),
   MONGODB_DNS_SERVERS: z.string().optional().transform(value => value ? value.split(',').map(item => item.trim()).filter(Boolean) : []),
-  CLIENT_URL: z.string().url(),
+  CLIENT_URL: z.string().min(1).refine(
+    value => value.split(',').every(origin => z.string().url().safeParse(origin.trim()).success),
+    'CLIENT_URL must contain one or more comma-separated valid URLs',
+  ),
   ACCESS_TOKEN_SECRET: z.string().min(32),
   REFRESH_TOKEN_SECRET: z.string().min(32),
   ACCESS_TOKEN_TTL: z.string().default('15m'),

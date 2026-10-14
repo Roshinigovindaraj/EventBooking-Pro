@@ -17,7 +17,16 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 export const app = express();
 app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors({ origin: env.CLIENT_URL, credentials: true, methods: ['GET', 'POST', 'PATCH', 'DELETE'] }));
+const configuredOrigins = new Set(env.CLIENT_URL.split(',').map(origin => origin.trim()).filter(Boolean));
+const isLocalDevelopmentOrigin = origin => env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || configuredOrigins.has(origin) || isLocalDevelopmentOrigin(origin)) return callback(null, true);
+    return callback(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use('/api/v1/auth', rateLimit({ windowMs: 15 * 60_000, limit: 50, standardHeaders: 'draft-7', legacyHeaders: false }), authRoutes);

@@ -9,9 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "server:dev": "npm --prefix server run dev",
-    "server:start": "npm --prefix server start",
-    "server:test": "npm --prefix server test"
+    "server:dev": "npm --prefix ../server run dev",
+    "server:start": "npm --prefix ../server start",
+    "server:test": "npm --prefix ../server test"
   },
   "dependencies": {
     "lucide-react": "0.468.0",
