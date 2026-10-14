@@ -24,7 +24,8 @@ export default function AuthPage() {
   const submit = async (event) => {
     event.preventDefault(); setError(""); setBusy(true);
     try {
-      await (registerMode ? register(form) : login({ email: form.email, password: form.password }));
+      const email = form.email.trim().toLowerCase();
+      await (registerMode ? register({ ...form, email }) : login({ email, password: form.password }));
       navigate(location.state?.from || "/dashboard", { replace: true });
     } catch (caught) { setError(caught.message); } finally { setBusy(false); }
   };
@@ -56,7 +57,7 @@ export default function AuthPage() {
         {error && <div className="form-error" role="alert">{error}</div>}
         <form onSubmit={submit}>
           {registerMode && <label>Full name<div className="auth-field"><User/><input required minLength="2" autoComplete="name" placeholder="Enter your full name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></div></label>}
-          <label>Email address<div className="auth-field"><Mail/><input required type="email" autoComplete="email" placeholder="you@example.com" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })}/></div></label>
+          <label>Email address<div className="auth-field"><Mail/><input required type="email" autoComplete="email" autoCapitalize="none" spellCheck="false" placeholder="you@example.com" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value.toLowerCase() })}/></div></label>
           <label>Password<div className="auth-field"><LockKeyhole/><input required type={showPassword ? "text" : "password"} minLength="10" autoComplete={registerMode ? "new-password" : "current-password"} placeholder="Minimum 10 characters" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })}/><button type="button" className={showPassword ? "visible" : ""} onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff/> : <Eye/>}</button></div></label>
           {!registerMode && <div className="auth-options"><label><input type="checkbox"/> Remember me</label><button type="button" onClick={openReset}>Forgot password?</button></div>}
           {registerMode && <label className="auth-consent"><input type="checkbox" required/><span>I agree to the <a href="#terms">Terms & Conditions</a> and <a href="#privacy">Privacy Policy</a>.</span></label>}
@@ -69,7 +70,7 @@ export default function AuthPage() {
       {resetStage === "complete" ? <div className="reset-success"><i><Check/></i><h2>Password updated</h2><p>Your password was reset successfully. Sign in using your new password.</p><button type="button" onClick={() => { setForm((current) => ({ ...current, email: resetEmail, password: "" })); setForgotOpen(false); }}>Back to Login</button></div>
       : resetStage === "email" ? <div className="reset-success"><i><Check/></i><h2>Check your email</h2><p>If an Eventoria account exists for <b>{resetEmail}</b>, password-reset instructions have been sent.</p><button type="button" onClick={() => setForgotOpen(false)}>Back to Login</button></div>
       : resetStage === "password" ? <><i><LockKeyhole/></i><p className="eyebrow">CREATE NEW PASSWORD</p><h2 id="reset-title">Set a new password</h2><p>Choose a secure password containing at least 10 characters.</p>{resetError && <div className="form-error">{resetError}</div>}<form onSubmit={completeReset}><label>New password<div className="auth-field"><LockKeyhole/><input type={showPassword ? "text" : "password"} required minLength="10" autoFocus value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Minimum 10 characters"/><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff/> : <Eye/>}</button></div></label><button className="auth-submit" disabled={resetBusy}>{resetBusy ? "Updating…" : "Reset Password"}<ArrowRight/></button></form></>
-      : <><i><LockKeyhole/></i><p className="eyebrow">ACCOUNT RECOVERY</p><h2 id="reset-title">Forgot your password?</h2><p>Enter your email address to securely reset your password.</p>{resetError && <div className="form-error">{resetError}</div>}<form onSubmit={requestReset}><label>Email address<div className="auth-field"><Mail/><input type="email" required autoFocus value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} placeholder="you@example.com"/></div></label><button className="auth-submit" disabled={resetBusy}>{resetBusy ? "Please wait…" : "Continue"}<ArrowRight/></button></form></>}
+      : <><i><LockKeyhole/></i><p className="eyebrow">ACCOUNT RECOVERY</p><h2 id="reset-title">Forgot your password?</h2><p>Enter your email address to securely reset your password.</p>{resetError && <div className="form-error">{resetError}</div>}<form onSubmit={requestReset}><label>Email address<div className="auth-field"><Mail/><input type="email" required autoFocus autoCapitalize="none" spellCheck="false" value={resetEmail} onChange={(event) => setResetEmail(event.target.value.toLowerCase())} placeholder="you@example.com"/></div></label><button className="auth-submit" disabled={resetBusy}>{resetBusy ? "Please wait…" : "Continue"}<ArrowRight/></button></form></>}
     </section></div>}
   </main>;
 }

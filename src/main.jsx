@@ -10,6 +10,7 @@ import SiteFooter from './components/SiteFooter.jsx';
 import VenuesPage from './pages/public/VenuesPage.jsx';
 import OrganizePage from './pages/public/OrganizePage.jsx';
 import ListVenuePage from './pages/public/ListVenuePage.jsx';
+import BookingPage from './pages/BookingPage.jsx';
 import { eventCategories } from './data/eventCategories.js';
 import './styles.css';
 
@@ -103,7 +104,7 @@ function Footer(){return <SiteFooter/>}
 
 function HomePage(){return <><Hero/><Categories/><Listings/><Why/><Wedding/><Testimonials/><CTA/><Footer/></>}
 
-export function App(){return <Routes><Route path="/" element={<HomePage/>}/><Route path="/discover" element={<CatalogPage/>}/><Route path="/venues" element={<VenuesPage/>}/><Route path="/organize" element={<OrganizePage/>}/><Route path="/list-venue" element={<ListVenuePage/>}/><Route path="/auth/:mode" element={<AuthPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/><Route path="*" element={<main className="state-message"><h1>Page not found</h1><Link to="/">Return home</Link></main>}/></Routes>}
+export function App(){return <Routes><Route path="/" element={<HomePage/>}/><Route path="/discover" element={<CatalogPage/>}/><Route path="/venues" element={<VenuesPage/>}/><Route path="/organize" element={<OrganizePage/>}/><Route path="/list-venue" element={<ListVenuePage/>}/><Route path="/auth/:mode" element={<AuthPage/>}/><Route path="/booking/:eventId" element={<BookingPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/><Route path="*" element={<main className="state-message"><h1>Page not found</h1><Link to="/">Return home</Link></main>}/></Routes>}
 
 const rootElement=document.getElementById('root');
 if(rootElement) createRoot(rootElement).render(<BrowserRouter><AuthProvider><App/></AuthProvider></BrowserRouter>);

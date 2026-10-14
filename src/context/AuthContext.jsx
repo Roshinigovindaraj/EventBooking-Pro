@@ -9,16 +9,18 @@ export function AuthProvider({ children }) {
 
   React.useEffect(() => {
     apiRequest('/auth/refresh', { method: 'POST' })
-      .then(result => { setAccessToken(result.accessToken); setUser(result.user); })
+      .then(result => { setAccessToken(result.accessToken); setUser(result.user ? { ...result.user, email: result.user.email?.toLowerCase() } : result.user); })
       .catch(() => { setAccessToken(null); setUser(null); })
       .finally(() => setLoading(false));
   }, []);
 
   const authenticate = async (mode, values) => {
-    const result = await apiRequest(`/auth/${mode}`, { method: 'POST', body: JSON.stringify(values) });
+    const normalizedValues = { ...values, email: values.email?.trim().toLowerCase() };
+    const result = await apiRequest(`/auth/${mode}`, { method: 'POST', body: JSON.stringify(normalizedValues) });
     setAccessToken(result.accessToken);
-    setUser(result.user);
-    return result.user;
+    const normalizedUser = result.user ? { ...result.user, email: result.user.email?.toLowerCase() } : result.user;
+    setUser(normalizedUser);
+    return normalizedUser;
   };
 
   const logout = async () => {
@@ -27,7 +29,7 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  const forgotPassword = email => apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+  const forgotPassword = email => apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase() }) });
   const resetPassword = values => apiRequest('/auth/reset-password', { method: 'POST', body: JSON.stringify(values) });
 
   return <AuthContext.Provider value={{ user, loading, login: values => authenticate('login', values), register: values => authenticate('register', values), forgotPassword, resetPassword, logout }}>{children}</AuthContext.Provider>;

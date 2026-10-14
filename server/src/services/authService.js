@@ -25,8 +25,9 @@ async function issueSession(user) {
 }
 
 export async function registerCustomer(input) {
-  if (await User.exists({ email: input.email.toLowerCase() })) throw new AppError(409, 'EMAIL_EXISTS', 'An account already exists for that email');
-  const user = new User({ name: input.name, email: input.email, passwordHash: await bcrypt.hash(input.password, 12), roles: ['customer'] });
+  const email = input.email.trim().toLowerCase();
+  if (await User.exists({ email })) throw new AppError(409, 'EMAIL_EXISTS', 'An account already exists for that email');
+  const user = new User({ name: input.name, email, passwordHash: await bcrypt.hash(input.password, 12), roles: ['customer'] });
   return { user, ...(await issueSession(user)) };
 }
 
@@ -45,11 +46,59 @@ export async function rotateRefreshToken(refreshToken) {
   } catch {
     throw new AppError(401, 'INVALID_SESSION', 'Session is invalid or expired');
   }
-  const user = await User.findById(payload.sub).select('+refreshSessions');
-  const session = user?.refreshSessions.id(payload.sid);
-  if (!session || session.tokenHash !== digest(refreshToken) || session.expiresAt <= new Date()) throw new AppError(401, 'INVALID_SESSION', 'Session is invalid or expired');
-  session.deleteOne();
-  return { user, ...(await issueSession(user)) };
+  const now = new Date();
+  const sessionId = crypto.randomUUID();
+  const nextRefreshToken = jwt.sign(
+    { sub: payload.sub, sid: sessionId },
+    env.REFRESH_TOKEN_SECRET,
+    { expiresIn: `${env.REFRESH_TOKEN_TTL_DAYS}d`, issuer: 'eventoria-api', audience: 'eventoria-web' },
+  );
+  const nextSession = {
+    _id: sessionId,
+    tokenHash: digest(nextRefreshToken),
+    expiresAt: new Date(now.getTime() + env.REFRESH_TOKEN_TTL_DAYS * 86400000),
+    createdAt: now,
+  };
+
+  // Consume the presented session and add its replacement in one database
+  // operation. This prevents concurrent /refresh calls from saving two stale
+  // User documents and triggering a Mongoose VersionError.
+  const user = await User.findOneAndUpdate(
+    {
+      _id: payload.sub,
+      refreshSessions: {
+        $elemMatch: {
+          _id: payload.sid,
+          tokenHash: digest(refreshToken),
+          expiresAt: { $gt: now },
+        },
+      },
+    },
+    [{
+      $set: {
+        refreshSessions: {
+          $concatArrays: [
+            {
+              $filter: {
+                input: { $ifNull: ['$refreshSessions', []] },
+                as: 'session',
+                cond: {
+                  $and: [
+                    { $ne: ['$$session._id', payload.sid] },
+                    { $gt: ['$$session.expiresAt', now] },
+                  ],
+                },
+              },
+            },
+            [nextSession],
+          ],
+        },
+      },
+    }],
+    { new: true },
+  );
+  if (!user) throw new AppError(401, 'INVALID_SESSION', 'Session is invalid or expired');
+  return { user, accessToken: signAccessToken(user), refreshToken: nextRefreshToken };
 }
 
 export async function revokeRefreshToken(refreshToken) {

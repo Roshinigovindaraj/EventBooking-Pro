@@ -395,8 +395,11 @@ function Filters({ selected, toggle, clear }) {
   );
 }
 function EventCard({ event, index, onView }) {
-  const storageKey = `eventoria:wishlist:event:${event.id}`;
+  const { user } = useAuth();
+  const owner = encodeURIComponent(user?._id || user?.id || user?.email?.toLowerCase() || "guest");
+  const storageKey = `eventoria:wishlist:${owner}:event:${event.id}`;
   const [liked, setLiked] = React.useState(() => localStorage.getItem(storageKey) === "1");
+  React.useEffect(() => setLiked(localStorage.getItem(storageKey) === "1"), [storageKey]);
   const toggleLiked = () => setLiked((current) => { const next = !current; localStorage.setItem(storageKey, next ? "1" : "0"); return next; });
   return (
     <article className="evx-card">
@@ -644,7 +647,14 @@ export default function CatalogPage() {
     localStorage.setItem("eventoria:compare:events", JSON.stringify(next));
     setGuestNotice(`Added to compare (${next.length}/3).`);
   };
-  const bookItem = (item) => user ? navigate("/dashboard") : navigate("/auth/login", { state: { from: "/discover", booking: item.id } });
+  const bookItem = (item) => {
+    if (!user) {
+      navigate("/auth/login", { state: { from: "/discover", booking: item.id } });
+      return;
+    }
+    setSelectedEvent(null);
+    navigate(`/booking/${item.id}`, { state: { event: item } });
+  };
   return (
     <div className="evx-page">
       <Topbar />

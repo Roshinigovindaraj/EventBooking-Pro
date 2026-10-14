@@ -108,8 +108,11 @@ const types = [
 ];
 
 function VenueCard({ venue, onView }) {
-  const storageKey = `eventoria:wishlist:venue:${venue.name}`;
+  const { user } = useAuth();
+  const owner = encodeURIComponent(user?._id || user?.id || user?.email?.toLowerCase() || "guest");
+  const storageKey = `eventoria:wishlist:${owner}:venue:${venue.name}`;
   const [liked, setLiked] = React.useState(() => localStorage.getItem(storageKey) === "1");
+  React.useEffect(() => setLiked(localStorage.getItem(storageKey) === "1"), [storageKey]);
   const toggleLiked = () => setLiked((current) => { const next = !current; localStorage.setItem(storageKey, next ? "1" : "0"); return next; });
   return (
     <article className="vn-card">
