@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { Topbar, eventData } from "./public/CatalogPage.jsx";
 import { venueData } from "./public/VenuesPage.jsx";
 import SiteFooter from "../components/SiteFooter.jsx";
+import { downloadEventTickets } from "../utils/ticketPdf.js";
 
 const roleNames = { customer: "Customer", event_organizer: "Event Organizer", venue_owner: "Venue Owner", event_staff: "Event Staff", venue_staff: "Venue Staff", admin: "Administrator", super_admin: "Super Administrator" };
 
@@ -37,11 +38,7 @@ export default function DashboardPage() {
     const nextDate = window.prompt("Enter the new event date", bookings.find((item) => item.id === id)?.date || "");
     if (nextDate?.trim()) saveBookings(bookings.map((item) => item.id === id ? { ...item, date: nextDate.trim(), status: "Rescheduled" } : item));
   };
-  const downloadBooking = (booking) => {
-    const content = ["EVENTORIA E-TICKET", booking.title, `${booking.date} · ${booking.time}`, `${booking.venue}, ${booking.city}`, `${booking.ticketType || "General Admission"} × ${booking.quantity || 1}`, `Booking: ${booking.id}`, `Status: ${booking.status}`].join("\n");
-    const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
-    const link = document.createElement("a"); link.href = url; link.download = `${booking.id}-ticket.txt`; link.click(); URL.revokeObjectURL(url);
-  };
+  const downloadBooking = (booking) => downloadEventTickets(booking);
   const removeFavorite = (item) => {
     const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
     localStorage.removeItem(`eventoria:wishlist:${owner}:${item.key}`);

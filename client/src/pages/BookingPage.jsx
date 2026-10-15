@@ -1,12 +1,26 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import QRCode from "qrcode";
 import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, CreditCard, Download, Landmark, MapPin, Minus, Plus, ShieldCheck, Smartphone, Ticket, WalletCards } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
+import { apiRequest } from "../services/apiClient.js";
 import { Topbar, eventData } from "./public/CatalogPage.jsx";
 import SiteFooter from "../components/SiteFooter.jsx";
+import { downloadEventTickets, ticketQrPayload } from "../utils/ticketPdf.js";
 
 const paymentMethods = [["Card", CreditCard], ["UPI", Smartphone], ["Net Banking", Landmark], ["Wallet", WalletCards]];
 const numericPrice = (value) => Number(String(value).replace(/[^0-9]/g, "")) || 0;
+const loadRazorpay = () => new Promise((resolve) => {
+  if (window.Razorpay) return resolve(true);
+  const existing = document.querySelector('script[data-razorpay-checkout]');
+  if (existing) { existing.addEventListener("load", () => resolve(true), { once: true }); existing.addEventListener("error", () => resolve(false), { once: true }); return; }
+  const script = document.createElement("script");
+  script.src = "https://checkout.razorpay.com/v1/checkout.js";
+  script.dataset.razorpayCheckout = "true";
+  script.onload = () => resolve(true);
+  script.onerror = () => resolve(false);
+  document.body.appendChild(script);
+});
 
 export default function BookingPage() {
   const { user, loading } = useAuth();
@@ -22,7 +36,22 @@ export default function BookingPage() {
   const [couponError, setCouponError] = React.useState("");
   const [payment, setPayment] = React.useState("Card");
   const [processing, setProcessing] = React.useState(false);
+  const [paymentError, setPaymentError] = React.useState("");
   const [booking, setBooking] = React.useState(null);
+  const [qrCodeUrl, setQrCodeUrl] = React.useState("");
+
+  React.useEffect(() => {
+    if (!booking) { setQrCodeUrl(""); return undefined; }
+    let active = true;
+    QRCode.toDataURL(ticketQrPayload(booking), {
+      errorCorrectionLevel: "H",
+      margin: 2,
+      width: 240,
+      color: { dark: "#09172e", light: "#ffffff" },
+    }).then((url) => { if (active) setQrCodeUrl(url); })
+      .catch(() => { if (active) setQrCodeUrl(""); });
+    return () => { active = false; };
+  }, [booking]);
 
   if (loading) return <p className="state-message">Restoring your session…</p>;
   if (!user) return <Navigate to="/auth/login" replace state={{ from: `/booking/${eventId}`, event }}/>; 
@@ -41,22 +70,48 @@ export default function BookingPage() {
     if (coupon.trim().toUpperCase() === "EVENT10") { setCouponApplied(true); setCouponError(""); }
     else { setCouponApplied(false); setCouponError("Use EVENT10 for 10% off"); }
   };
-  const pay = () => {
-    setProcessing(true);
-    window.setTimeout(() => {
+  const confirmBooking = (paymentDetails = {}) => {
       const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
       const key = `eventoria:bookings:${owner}`;
       const current = JSON.parse(localStorage.getItem(key) || "[]");
-      const confirmed = { id: `EVT-${Date.now()}`, eventId: event.id, title: event.title, image: event.image, date: dateLabel, time: event.time, venue: event.venue, city: event.city, price: money(total), quantity, ticketType, payment, status: "Confirmed", bookedAt: new Date().toISOString() };
+      const confirmed = { id: `EVT-${Date.now()}`, eventId: event.id, title: event.title, image: event.image, date: dateLabel, time: event.time, venue: event.venue, city: event.city, price: money(total), quantity, ticketType, payment: paymentDetails.provider || payment, paymentId: paymentDetails.paymentId, orderId: paymentDetails.orderId, status: "Confirmed", bookedAt: new Date().toISOString() };
       localStorage.setItem(key, JSON.stringify([confirmed, ...current]));
       setBooking(confirmed); setProcessing(false); setStep(3);
-    }, 650);
   };
-  const downloadTicket = () => {
-    const content = [`EVENTORIA E-TICKET`, booking.title, `${booking.date} · ${booking.time}`, `${booking.venue}, ${booking.city}`, `${booking.ticketType} × ${booking.quantity}`, `Booking: ${booking.id}`, `Paid: ${booking.price}`].join("\n");
-    const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
-    const link = document.createElement("a"); link.href = url; link.download = `${booking.id}-ticket.txt`; link.click(); URL.revokeObjectURL(url);
+  const pay = async () => {
+    setProcessing(true); setPaymentError("");
+    try {
+      const result = await apiRequest("/payments/razorpay/order", { method: "POST", body: JSON.stringify({ amountMinor: total * 100, receipt: `evt_${event.id}_${Date.now()}`.slice(0, 40) }) });
+      if (result.order.provider === "mock") {
+        window.setTimeout(() => confirmBooking({ provider: "Development mock" }), 500);
+        return;
+      }
+      if (!await loadRazorpay()) throw new Error("Unable to load Razorpay Checkout. Check your internet connection.");
+      const checkout = new window.Razorpay({
+        key: result.keyId,
+        order_id: result.order.id,
+        amount: result.order.amount,
+        currency: result.order.currency,
+        name: "Eventoria",
+        description: `${event.title} · ${ticketType} × ${quantity}`,
+        image: "/images/hero-wedding.png",
+        prefill: { name: user.name, email: user.email },
+        notes: { eventId: String(event.id), ticketType, quantity: String(quantity) },
+        theme: { color: "#ed1269" },
+        modal: { ondismiss: () => setProcessing(false) },
+        handler: async (response) => {
+          try {
+            const verified = await apiRequest("/payments/razorpay/verify", { method: "POST", body: JSON.stringify({ orderId: result.order.id, paymentId: response.razorpay_payment_id, signature: response.razorpay_signature }) });
+            if (!verified.verified) throw new Error("Payment could not be verified.");
+            confirmBooking({ provider: "Razorpay", paymentId: verified.paymentId, orderId: verified.orderId });
+          } catch (error) { setPaymentError(error.message); setProcessing(false); }
+        },
+      });
+      checkout.on("payment.failed", (response) => { setPaymentError(response.error?.description || "Payment failed. Please try again."); setProcessing(false); });
+      checkout.open();
+    } catch (error) { setPaymentError(error.message); setProcessing(false); }
   };
+  const downloadTicket = () => downloadEventTickets(booking);
 
   return <main className="booking-page"><Topbar active="events"/><section className="booking-wrap">
     <button className="booking-back" onClick={() => navigate("/discover")}><ArrowLeft/> Back to events</button>
@@ -66,9 +121,9 @@ export default function BookingPage() {
     {step < 3 && <div className="booking-layout"><section className="booking-panel">
       <article className="booking-event"><img src={event.image} alt={event.title}/><div><span>{event.type}</span><h2>{event.title}</h2><p><CalendarDays/> {dateLabel} · {event.time}</p><p><MapPin/> {event.venue}, {event.city}</p></div></article>
       {step === 1 ? <div className="booking-options"><h2>Select Booking Options</h2><label>Ticket type<select value={ticketType} onChange={(e) => setTicketType(e.target.value)}><option>General Admission</option><option>Premium</option><option>VIP</option></select></label><div className="ticket-quantity"><span><b>Number of tickets</b><small>Tickets are reserved during checkout</small></span><div><button onClick={() => setQuantity(Math.max(1, quantity - 1))}><Minus/></button><b>{quantity}</b><button onClick={() => setQuantity(Math.min(10, quantity + 1))}><Plus/></button></div></div><div className="booking-lock"><ShieldCheck/> Your selected tickets will be securely reserved.</div><button className="booking-primary" onClick={() => setStep(2)}>Continue to Checkout <ArrowRight/></button></div>
-      : <div className="booking-options"><h2>Select Payment Method</h2><div className="payment-methods">{paymentMethods.map(([name, Icon]) => <button className={payment === name ? "active" : ""} onClick={() => setPayment(name)} key={name}><Icon/><span>{name}</span></button>)}</div><div className="payment-note"><ShieldCheck/><span><b>Secure demo payment</b><small>No real funds will be charged.</small></span></div><div className="checkout-actions"><button onClick={() => setStep(1)}>Back</button><button className="booking-primary" disabled={processing} onClick={pay}>{processing ? "Processing…" : `Pay ${money(total)}`} <ArrowRight/></button></div></div>}
+      : <div className="booking-options"><h2>Select Payment Method</h2><div className="payment-methods">{paymentMethods.map(([name, Icon]) => <button className={payment === name ? "active" : ""} onClick={() => setPayment(name)} key={name}><Icon/><span>{name}</span></button>)}</div><div className="payment-note"><ShieldCheck/><span><b>Secured by Razorpay</b><small>Payment is verified securely before your booking is confirmed.</small></span></div>{paymentError&&<div className="payment-error">{paymentError}</div>}<div className="checkout-actions"><button onClick={() => setStep(1)}>Back</button><button className="booking-primary" disabled={processing} onClick={pay}>{processing ? "Opening Razorpay…" : `Pay ${money(total)} Securely`} <ArrowRight/></button></div></div>}
     </section><aside className="price-panel"><h2>Price Breakdown</h2><dl><div><dt>{ticketType} × {quantity}</dt><dd>{money(subtotal)}</dd></div><div><dt>Taxes & fees</dt><dd>{money(fees)}</dd></div>{couponApplied&&<div className="discount"><dt>Coupon discount</dt><dd>− {money(discount)}</dd></div>}<div className="total"><dt>Total Amount</dt><dd>{money(total)}</dd></div></dl><label>Apply coupon code<div><input value={coupon} onChange={(e) => setCoupon(e.target.value)} placeholder="Enter coupon"/><button onClick={applyCoupon}>Apply</button></div></label>{couponApplied&&<p className="coupon-success"><Check/> EVENT10 applied</p>}{couponError&&<p className="coupon-error">{couponError}</p>}</aside></div>}
 
-    {step === 3 && booking && <section className="booking-success"><div className="success-mark"><Check/></div><p>PAYMENT SUCCESSFUL</p><h2>Booking Confirmed!</h2><span>A confirmation has been created for your Eventoria account.</span><article className="ticket-card"><div className="ticket-event"><img src={booking.image} alt=""/><div><b>{booking.title}</b><small>{booking.date} · {booking.time}</small><small>{booking.venue}, {booking.city}</small></div></div><div className="ticket-qr" aria-label="Ticket QR code">{Array.from({length:49},(_,i)=><i className={(i*7+i%5)%3 ? "on" : ""} key={i}/>)}</div><dl><div><dt>Booking ID</dt><dd>{booking.id}</dd></div><div><dt>Ticket Type</dt><dd>{booking.ticketType}</dd></div><div><dt>Quantity</dt><dd>{booking.quantity}</dd></div><div><dt>Total Paid</dt><dd>{booking.price}</dd></div></dl></article><div className="success-actions"><button onClick={downloadTicket}><Download/> Download E-Ticket</button><button className="booking-primary" onClick={() => navigate("/dashboard")}>View My Bookings <ArrowRight/></button></div></section>}
+    {step === 3 && booking && <section className="booking-success"><div className="success-mark"><Check/></div><p>PAYMENT SUCCESSFUL</p><h2>Booking Confirmed!</h2><span>A confirmation has been created for your Eventoria account.</span><article className="ticket-card"><div className="ticket-event"><img src={booking.image} alt=""/><div><b>{booking.title}</b><small>{booking.date} · {booking.time}</small><small>{booking.venue}, {booking.city}</small></div></div><div className="ticket-qr">{qrCodeUrl ? <img src={qrCodeUrl} alt={`QR code for ticket ${booking.id}-P01`}/> : <span>Generating QR code…</span>}</div><dl><div><dt>Booking ID</dt><dd>{booking.id}</dd></div><div><dt>Ticket Type</dt><dd>{booking.ticketType}</dd></div><div><dt>Quantity</dt><dd>{booking.quantity} unique {booking.quantity === 1 ? "ticket" : "tickets"}</dd></div><div><dt>Total Paid</dt><dd>{booking.price}</dd></div></dl></article><div className="success-actions"><button onClick={downloadTicket}><Download/> Download {booking.quantity > 1 ? `${booking.quantity} E-Tickets` : "E-Ticket"}</button><button className="booking-primary" onClick={() => navigate("/dashboard")}>View My Bookings <ArrowRight/></button></div></section>}
   </section><SiteFooter/></main>;
 }

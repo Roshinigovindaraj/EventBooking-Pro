@@ -17,6 +17,8 @@ const schema = z.object({
   COOKIE_SECURE: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
   PAYMENT_MODE: z.enum(['mock', 'provider']).default('mock'),
   PAYMENT_WEBHOOK_SECRET: z.string().min(16),
+  RAZORPAY_KEY_ID: z.preprocess(value => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().trim().regex(/^rzp_(test|live)_[A-Za-z0-9]+$/).optional()),
+  RAZORPAY_KEY_SECRET: z.preprocess(value => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().trim().min(20).optional()),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -26,4 +28,8 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+if (env.PAYMENT_MODE === 'provider' && (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET)) {
+  throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENT_MODE=provider');
+}
 
