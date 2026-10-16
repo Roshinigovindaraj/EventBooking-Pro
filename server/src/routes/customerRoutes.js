@@ -1,21 +1,53 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { Booking } from '../models/Booking.js';
+import { Event } from '../models/Event.js';
+import { Ticket } from '../models/Ticket.js';
 import { VenueReservation } from '../models/VenueReservation.js';
 import { Wishlist } from '../models/Wishlist.js';
 import { createEventBooking, createVenueReservation } from '../services/bookingService.js';
-import { notFound } from '../utils/errors.js';
+import { AppError, notFound } from '../utils/errors.js';
 
 const router = Router();
 router.use(['/users', '/bookings', '/venue-reservations', '/wishlist'], authenticate);
 router.get('/users/me', (req, res) => res.json({ user: req.user }));
 router.patch('/users/me', validate(z.object({ body: z.object({ name: z.string().trim().min(2).max(80) }) })), async (req, res, next) => { try { req.user.name = req.body.name; await req.user.save(); res.json({ user: req.user }); } catch (e) { next(e); } });
 
-router.get('/bookings/me', async (req, res, next) => { try { res.json({ items: await Booking.find({ customer: req.user.id }).populate('event', 'title startsAt images').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
+router.get('/bookings/me', async (req, res, next) => { try { res.json({ items: await Booking.find({ customer: req.user.id }).populate('event', 'title startsAt endsAt images venueName location ticketTypes').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 router.post('/bookings', validate(z.object({ body: z.object({ eventId: z.string().regex(/^[a-f\d]{24}$/i), ticketTypeId: z.string().regex(/^[a-f\d]{24}$/i), quantity: z.number().int().min(1).max(20) }) })), async (req, res, next) => { try { res.status(201).json({ booking: await createEventBooking({ customerId: req.user.id, ...req.body }) }); } catch (e) { next(e); } });
 router.get('/bookings/:id', async (req, res, next) => { try { const booking = await Booking.findOne({ _id: req.params.id, customer: req.user.id }).populate('event'); if (!booking) throw notFound('Booking not found'); res.json({ booking }); } catch (e) { next(e); } });
+router.patch('/bookings/:id/cancel', async (req, res, next) => {
+  const session = await mongoose.startSession();
+  try {
+    let cancelledBooking;
+    await session.withTransaction(async () => {
+      const booking = await Booking.findOne({ _id: req.params.id, customer: req.user.id }).populate('event').session(session);
+      if (!booking) throw notFound('Booking not found');
+      if (!['pending_payment', 'confirmed'].includes(booking.status)) throw new AppError(409, 'BOOKING_NOT_CANCELLABLE', 'This booking can no longer be cancelled');
+      if (booking.event?.startsAt <= new Date()) throw new AppError(409, 'EVENT_ALREADY_STARTED', 'Bookings cannot be cancelled after the event starts');
+      if (await Ticket.exists({ booking: booking.id, status: 'checked_in' }).session(session)) throw new AppError(409, 'TICKET_ALREADY_USED', 'A checked-in booking cannot be cancelled');
+
+      const inventoryField = booking.status === 'confirmed' ? 'ticketTypes.$.sold' : 'ticketTypes.$.reserved';
+      const inventory = await Event.updateOne(
+        { _id: booking.event._id, 'ticketTypes._id': booking.ticketTypeId, [inventoryField]: { $gte: booking.quantity } },
+        { $inc: { [inventoryField]: -booking.quantity } },
+        { session },
+      );
+      if (!inventory.modifiedCount) throw new AppError(409, 'INVENTORY_RELEASE_FAILED', 'Booking inventory could not be released');
+
+      booking.status = 'cancelled';
+      booking.paymentStatus = booking.paymentStatus === 'successful' ? 'refunded' : 'cancelled';
+      await booking.save({ session });
+      await Ticket.updateMany({ booking: booking.id, status: 'issued' }, { status: booking.paymentStatus === 'refunded' ? 'refunded' : 'cancelled' }, { session });
+      cancelledBooking = booking;
+    });
+    res.json({ booking: cancelledBooking });
+  } catch (e) { next(e); }
+  finally { await session.endSession(); }
+});
 
 router.post('/venue-reservations', validate(z.object({ body: z.object({ venueId: z.string().regex(/^[a-f\d]{24}$/i), startsAt: z.string().datetime(), endsAt: z.string().datetime(), purpose: z.string().trim().min(3).max(300) }) })), async (req, res, next) => { try { res.status(201).json({ reservation: await createVenueReservation({ customerId: req.user.id, ...req.body }) }); } catch (e) { next(e); } });
 router.get('/venue-reservations/me', async (req, res, next) => { try { res.json({ items: await VenueReservation.find({ customer: req.user.id }).populate('venue', 'name location images').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });

@@ -2,6 +2,7 @@ import React from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
+import { apiRequest } from "../../services/apiClient.js";
 import {
   ArrowRight,
   Bell,
@@ -221,6 +222,16 @@ const eventData = events.map((event, index) => ({
 }));
 export { eventData };
 
+const publicEvent = (event, index) => {
+  const start = new Date(event.startsAt);
+  const end = new Date(event.endsAt);
+  const prices = (event.ticketTypes || []).map((ticket) => ticket.priceMinor / 100);
+  const capacity = (event.ticketTypes || []).reduce((sum, ticket) => sum + ticket.capacity, 0);
+  const used = (event.ticketTypes || []).reduce((sum, ticket) => sum + ticket.sold + ticket.reserved, 0);
+  const formatTime = (date) => date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  return { id: event._id, image: event.images?.[0] || eventData[index % eventData.length].image, day: String(start.getDate()).padStart(2, "0"), month: start.toLocaleString("en-IN", { month: "short" }).toUpperCase(), title: event.title, type: event.subcategory || event.category, venue: event.venueName || "Venue to be announced", time: `${formatTime(start)} - ${formatTime(end)}`, price: `₹ ${(prices.length ? Math.min(...prices) : 0).toLocaleString("en-IN")}`, city: event.location?.city || "", priceValue: prices.length ? Math.min(...prices) : 0, startsAt: event.startsAt, mode: "In-Person Events", availability: capacity > 0 && used >= capacity ? "Sold Out" : "Available Tickets", recommendation: 100 - index };
+};
+
 const startOfDay = (value) => {
   const date = new Date(value);
   date.setHours(0, 0, 0, 0);
@@ -439,6 +450,7 @@ function EventCard({ event, index, onView }) {
   );
 }
 export default function CatalogPage() {
+  const [catalogEvents, setCatalogEvents] = React.useState(eventData);
   const navigate = useNavigate();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -472,6 +484,12 @@ export default function CatalogPage() {
   const [openDropdown, setOpenDropdown] = React.useState(null);
   const [selectedEvent, setSelectedEvent] = React.useState(null);
   const [guestNotice, setGuestNotice] = React.useState("");
+  React.useEffect(() => {
+    let active = true;
+    const load = () => apiRequest('/events?limit=50').then((result) => { if (active && result.items?.length) setCatalogEvents(result.items.map(publicEvent)); }).catch(() => null);
+    load(); window.addEventListener('eventoria:data-changed', load); window.addEventListener('focus', load);
+    return () => { active = false; window.removeEventListener('eventoria:data-changed', load); window.removeEventListener('focus', load); };
+  }, []);
   const [calendarMonth, setCalendarMonth] = React.useState(() => {
     const date = new Date();
     return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -506,7 +524,7 @@ export default function CatalogPage() {
   const availableDateValues = React.useMemo(() => {
     const searchTerm = queryDraft.trim().toLowerCase();
     return new Set(
-      eventData
+      catalogEvents
         .filter((event) => {
           const matchesLocation =
             locationDraft === "All locations" || event.city === locationDraft;
@@ -521,7 +539,7 @@ export default function CatalogPage() {
         })
         .map((event) => toDateValue(new Date(event.startsAt))),
     );
-  }, [category, locationDraft, queryDraft]);
+  }, [catalogEvents, category, locationDraft, queryDraft]);
   const selectCalendarDate = (date) => {
     const value = toDateValue(date);
     setDateDraft(value);
@@ -572,7 +590,7 @@ export default function CatalogPage() {
     return () =>
       window.removeEventListener("eventoria:apply-filters", applyFilters);
   }, []);
-  const filtered = eventData.filter((event) => {
+  const filtered = catalogEvents.filter((event) => {
     const matchesSearch =
       !query ||
       `${event.title} ${event.artist || ""} ${event.type} ${event.venue}`

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Topbar } from "./CatalogPage.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
+import { apiRequest } from "../../services/apiClient.js";
 
 const venueImages = [
   "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=900&q=85",
@@ -95,6 +96,7 @@ const venues = [
   image: venueImages[index],
 }));
 export { venues as venueData };
+const publicVenue = (venue, index) => ({ name: venue.name, id: venue._id, type: venue.type, city: venue.location?.city || "", guests: `Up to ${Number(venue.capacity).toLocaleString("en-IN")}`, capacity: venue.capacity, price: Math.round(venue.priceMinorPerHour / 100), rating: "New", reviews: "0", image: venue.images?.[0] || venueImages[index % venueImages.length] });
 
 const types = [
   "All Venues",
@@ -159,7 +161,9 @@ export default function VenuesPage() {
   const [page, setPage] = React.useState(1);
   const [selectedVenue, setSelectedVenue] = React.useState(null);
   const [guestNotice, setGuestNotice] = React.useState("");
-  const filtered = venues.filter(
+  const [catalogVenues, setCatalogVenues] = React.useState(venues);
+  React.useEffect(() => { let active = true; const load = () => apiRequest('/venues').then((result) => { if (active && result.items?.length) setCatalogVenues(result.items.map(publicVenue)); }).catch(() => null); load(); window.addEventListener('eventoria:data-changed', load); window.addEventListener('focus', load); return () => { active = false; window.removeEventListener('eventoria:data-changed', load); window.removeEventListener('focus', load); }; }, []);
+  const filtered = catalogVenues.filter(
     (v) =>
       (!query ||
         `${v.name} ${v.type} ${v.city}`

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "seed:catalog": "node src/scripts/seedCatalog.js",
+    "seed:roles": "node src/scripts/seedRoleAccounts.js",
     "test": "cross-env NODE_ENV=test vitest run"
   },
   "dependencies": {

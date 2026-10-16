@@ -23,6 +23,12 @@ describe('Eventoria application', () => {
     expect(screen.queryByRole('heading', { name: 'Browse Events by Category' })).not.toBeInTheDocument();
   });
 
+  it('opens booking from a home-page event card', async () => {
+    render(<MemoryRouter initialEntries={['/']}><AuthProvider><App/></AuthProvider></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Book Tech Innovation Summit 2026' }));
+    expect(await screen.findByRole('heading', { name: /Welcome back/i })).toBeInTheDocument();
+  });
+
   it('filters, sorts, and loads more events', () => {
     render(<MemoryRouter initialEntries={['/discover']}><AuthProvider><App/></AuthProvider></MemoryRouter>);
     expect(screen.getByText('12 Events Found')).toBeInTheDocument();

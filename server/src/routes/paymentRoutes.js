@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import mongoose from 'mongoose';
 import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
@@ -12,11 +13,40 @@ import { AppError, notFound } from '../utils/errors.js';
 const router = Router();
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 
+async function finalizeBooking({ bookingId, customerId }) {
+  const session = await mongoose.startSession();
+  try {
+    let confirmedBooking;
+    let issuedTickets = [];
+    await session.withTransaction(async () => {
+      const booking = await Booking.findOne({ _id: bookingId, customer: customerId, status: 'pending_payment', reservationExpiresAt: { $gt: new Date() } }).session(session);
+      if (!booking) throw new AppError(409, 'BOOKING_NOT_PAYABLE', 'Booking is unavailable, expired, or already processed');
+      const event = await Event.findOneAndUpdate(
+        { _id: booking.event, 'ticketTypes._id': booking.ticketTypeId, 'ticketTypes.reserved': { $gte: booking.quantity } },
+        { $inc: { 'ticketTypes.$.reserved': -booking.quantity, 'ticketTypes.$.sold': booking.quantity } },
+        { new: true, session },
+      );
+      if (!event) throw new AppError(409, 'INVENTORY_FINALIZATION_FAILED', 'Booking inventory could not be finalized');
+      booking.status = 'confirmed';
+      booking.paymentStatus = 'successful';
+      await booking.save({ session });
+      confirmedBooking = booking;
+      for (let index = 0; index < booking.quantity; index += 1) {
+        const credential = crypto.randomBytes(32).toString('base64url');
+        const code = `TKT-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+        const [ticket] = await Ticket.create([{ booking: booking.id, event: booking.event, owner: customerId, code, credentialHash: hash(credential), status: 'issued' }], { session });
+        issuedTickets.push({ id: ticket.id, code: ticket.code, credential });
+      }
+    });
+    return { booking: confirmedBooking, tickets: issuedTickets };
+  } finally { await session.endSession(); }
+}
+
 const razorpayOrder = z.object({ body: z.object({
-  amountMinor: z.number().int().min(100).max(10_000_000),
-  receipt: z.string().trim().min(1).max(40),
+  bookingId: z.string().regex(/^[a-f\d]{24}$/i),
 }) });
 const razorpayVerification = z.object({ body: z.object({
+  bookingId: z.string().regex(/^[a-f\d]{24}$/i),
   orderId: z.string().startsWith('order_'),
   paymentId: z.string().startsWith('pay_'),
   signature: z.string().regex(/^[a-f\d]{64}$/i),
@@ -24,14 +54,16 @@ const razorpayVerification = z.object({ body: z.object({
 
 router.post('/payments/razorpay/order', authenticate, validate(razorpayOrder), async (req, res, next) => {
   try {
+    const booking = await Booking.findOne({ _id: req.body.bookingId, customer: req.user.id, status: 'pending_payment', reservationExpiresAt: { $gt: new Date() } });
+    if (!booking) throw notFound('Active pending booking not found');
     if (env.PAYMENT_MODE === 'mock') {
-      return res.json({ order: { provider: 'mock', id: `order_mock_${crypto.randomUUID()}`, amount: req.body.amountMinor, currency: 'INR' } });
+      return res.json({ order: { provider: 'mock', id: `order_mock_${crypto.randomUUID()}`, amount: booking.totalMinor, currency: booking.currency } });
     }
     const authorization = Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64');
     const response = await fetch('https://api.razorpay.com/v1/orders', {
       method: 'POST',
       headers: { authorization: `Basic ${authorization}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ amount: req.body.amountMinor, currency: 'INR', receipt: req.body.receipt }),
+      body: JSON.stringify({ amount: booking.totalMinor, currency: booking.currency, receipt: booking.bookingReference.slice(0, 40) }),
     });
     const order = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -57,7 +89,8 @@ router.post('/payments/razorpay/verify', authenticate, validate(razorpayVerifica
     if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
       throw new AppError(400, 'INVALID_PAYMENT_SIGNATURE', 'Razorpay payment verification failed');
     }
-    return res.json({ verified: true, paymentId: req.body.paymentId, orderId: req.body.orderId });
+    const finalized = await finalizeBooking({ bookingId: req.body.bookingId, customerId: req.user.id });
+    return res.json({ verified: true, paymentId: req.body.paymentId, orderId: req.body.orderId, ...finalized });
   } catch (error) { return next(error); }
 });
 
@@ -73,18 +106,8 @@ router.post('/payments/create-order', authenticate, validate(z.object({ body: z.
 router.post('/payments/mock-confirm', authenticate, validate(z.object({ body: z.object({ bookingId: z.string().regex(/^[a-f\d]{24}$/i) }) })), async (req, res, next) => {
   try {
     if (env.NODE_ENV === 'production' || env.PAYMENT_MODE !== 'mock') throw new AppError(404, 'ROUTE_NOT_FOUND', 'Route not found');
-    const booking = await Booking.findOneAndUpdate({ _id: req.body.bookingId, customer: req.user.id, status: 'pending_payment', reservationExpiresAt: { $gt: new Date() } }, { status: 'confirmed', paymentStatus: 'successful' }, { new: true });
-    if (!booking) throw new AppError(409, 'BOOKING_NOT_PAYABLE', 'Booking is unavailable, expired, or already processed');
-    const event = await Event.findOneAndUpdate({ _id: booking.event, 'ticketTypes._id': booking.ticketTypeId, 'ticketTypes.reserved': { $gte: booking.quantity } }, { $inc: { 'ticketTypes.$.reserved': -booking.quantity, 'ticketTypes.$.sold': booking.quantity } }, { new: true });
-    if (!event) throw new AppError(409, 'INVENTORY_FINALIZATION_FAILED', 'Booking inventory could not be finalized');
-    const tickets = [];
-    for (let i = 0; i < booking.quantity; i += 1) {
-      const credential = crypto.randomBytes(32).toString('base64url');
-      const code = `TKT-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
-      const ticket = await Ticket.findOneAndUpdate({ booking: booking.id, code }, { $setOnInsert: { event: booking.event, owner: req.user.id, credentialHash: hash(credential), status: 'issued' } }, { upsert: true, new: true });
-      tickets.push({ id: ticket.id, code: ticket.code, credential });
-    }
-    res.json({ booking, tickets, warning: 'Confirmed by development-only mock payment' });
+    const finalized = await finalizeBooking({ bookingId: req.body.bookingId, customerId: req.user.id });
+    res.json({ ...finalized, warning: 'Confirmed by development-only mock payment' });
   } catch (e) { next(e); }
 });
 export default router;

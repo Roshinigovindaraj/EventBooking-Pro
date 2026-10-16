@@ -1,16 +1,18 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Link, Route, Routes, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Search, MapPin, CalendarDays, Heart, ArrowRight, ChevronLeft, ChevronRight, ShieldCheck, Headphones, Tag, Sparkles, Mail, Menu, X, Star, Ticket, Building2, Smartphone, Music2, PartyPopper, Gem, BriefcaseBusiness, Trophy, TentTree, Mic2, Store, Play, Users, Gift, House } from 'lucide-react';
 import { AuthProvider } from './context/AuthContext.jsx';
 import AuthPage from './pages/auth/AuthPage.jsx';
-import CatalogPage, { Topbar } from './pages/public/CatalogPage.jsx';
+import CatalogPage, { Topbar, eventData } from './pages/public/CatalogPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import SiteFooter from './components/SiteFooter.jsx';
-import VenuesPage from './pages/public/VenuesPage.jsx';
+import VenuesPage, { venueData } from './pages/public/VenuesPage.jsx';
 import OrganizePage from './pages/public/OrganizePage.jsx';
 import ListVenuePage from './pages/public/ListVenuePage.jsx';
 import BookingPage from './pages/BookingPage.jsx';
+import RolePortalPage from './pages/RolePortalPage.jsx';
+import TicketScannerPage from './pages/TicketScannerPage.jsx';
 import { eventCategories } from './data/eventCategories.js';
 import './styles.css';
 
@@ -41,19 +43,8 @@ const heroCopy = [
 
 const categories = eventCategories.map(({name,image})=>[name,image]);
 
-const events = [
-  {image: img.event1, day:'15', mon:'Nov', type:'Concert', title:'Arijit Singh Live in Concert', city:'Chennai', place:'Nehru Indoor Stadium', price:'₹999'},
-  {image: img.event2, day:'22', mon:'Nov', type:'Comedy', title:'Stand Up Comedy Night', city:'Bangalore', place:'The Laugh Club', price:'₹499'},
-  {image: img.event3, day:'28', mon:'Nov', type:'Business', title:'Tech Innovation Summit 2026', city:'Delhi', place:'Pragati Maidan', price:'₹1,499'},
-  {image: img.event4, day:'05', mon:'Dec', type:'Festival', title:'Food & Culture Festival', city:'Pune', place:'Aga Khan Palace', price:'₹299'},
-];
-
-const venues = [
-  {image:img.venue1,title:'The Grand Palace',rating:'4.8',reviews:'2,840',kind:'Banquet Hall',city:'Mumbai',guests:'500',price:'₹25,000/day'},
-  {image:img.venue2,title:'Skyline Convention',rating:'4.6',reviews:'2,080',kind:'Conference Hall',city:'Bangalore',guests:'1000',price:'₹40,000/day'},
-  {image:img.venue3,title:'Royal Orchids Resort',rating:'4.7',reviews:'756',kind:'Resort',city:'Goa',guests:'300',price:'₹60,000/day'},
-  {image:img.venue4,title:'The Lotus Banquet',rating:'4.8',reviews:'3,890',kind:'Banquet Hall',city:'Delhi',guests:'800',price:'₹35,000/day'},
-];
+const featuredEvents = eventData.slice(0, 4);
+const featuredVenues = venueData.slice(0, 4);
 
 function Logo({light=false}) { return <a className={`logo ${light?'light':''}`} href="#"><span className="logo-mark">✦</span><span><b>Eventoria</b><small>Events • Venues • Every Moment</small></span></a> }
 
@@ -82,10 +73,10 @@ function CategoryDirectory(){const navigate=useNavigate();return <section classN
 function SectionTitle({kicker,title,accent,desc}){return <div className="section-heading"><div><p className="eyebrow">{kicker}</p><h2>{title} <em>{accent}</em></h2>{desc&&<p>{desc}</p>}</div><a href="#">View All {kicker.includes('VENUE')?'Venues':'Events'} <ArrowRight/></a></div>}
 function CarouselButtons(){return <div className="carousel-buttons"><button aria-label="Previous"><ChevronLeft/></button><button aria-label="Next"><ChevronRight/></button></div>}
 
-function EventCard({e}){return <article className="card"><div className="card-image"><img src={e.image} alt={e.title}/><button className="heart"><Heart/></button><div className="date"><b>{e.day}</b><span>{e.mon}</span></div></div><div className="card-body"><span className={`pill ${e.type.toLowerCase()}`}>{e.type}</span><h3>{e.title}</h3><p><MapPin/> {e.city}</p><p><Store/> {e.place}</p><div className="price">From <b>{e.price}</b><button><ArrowRight/></button></div></div></article>}
-function VenueCard({v}){return <article className="card"><div className="card-image venue"><img src={v.image} alt={v.title}/><button className="heart"><Heart/></button></div><div className="card-body"><h3>{v.title}</h3><div className="rating"><Star fill="#ff9e34"/> {v.rating} <small>({v.reviews} reviews)</small></div><p><Store/> {v.kind} <span>•</span> {v.city}</p><p><ShieldCheck/> Upto {v.guests} Guests</p><div className="price">From <b>{v.price}</b><button><ArrowRight/></button></div></div></article>}
+function EventCard({e}){const navigate=useNavigate();const book=()=>navigate(`/booking/${e.id}`,{state:{event:e}});return <article className="card"><div className="card-image"><img src={e.image} alt={e.title}/><button className="heart" aria-label={`Save ${e.title}`}><Heart/></button><div className="date"><b>{e.day}</b><span>{e.month}</span></div></div><div className="card-body"><span className={`pill ${e.type.toLowerCase()}`}>{e.type}</span><h3>{e.title}</h3><p><MapPin/> {e.city}</p><p><Store/> {e.venue}</p><div className="price">From <b>{e.price}</b><button onClick={book} aria-label={`Book ${e.title}`}><ArrowRight/></button></div></div></article>}
+function VenueCard({v}){const navigate=useNavigate();return <article className="card"><div className="card-image venue"><img src={v.image} alt={v.name}/><button className="heart" aria-label={`Save ${v.name}`}><Heart/></button></div><div className="card-body"><h3>{v.name}</h3><div className="rating"><Star fill="#ff9e34"/> {v.rating} <small>({v.reviews} reviews)</small></div><p><Store/> {v.type} <span>•</span> {v.city}</p><p><ShieldCheck/> {v.guests} Guests</p><div className="price">From <b>₹{v.price.toLocaleString('en-IN')}/day</b><button onClick={()=>navigate('/venues')} aria-label={`View ${v.name}`}><ArrowRight/></button></div></div></article>}
 
-function Listings(){return <main className="discovery"><section className="listing wrap" id="events"><SectionTitle kicker="FEATURED EVENTS" title="Trending" accent="Events" desc="Happening Near You"/><div className="title-sub">Explore the most exciting events and book your tickets before they’re gone!</div><CarouselButtons/><div className="cards">{events.map(e=><EventCard e={e} key={e.title}/>)}</div></section><section className="listing wrap" id="venues"><SectionTitle kicker="POPULAR VENUES" title="Extraordinary" accent="Venues" desc="for Your Special Occasions"/><div className="title-sub">From luxury banquet halls to outdoor spaces, find the perfect venue for weddings, parties, corporate events and more.</div><CarouselButtons/><div className="cards">{venues.map(v=><VenueCard v={v} key={v.title}/>)}</div></section></main>}
+function Listings(){return <main className="discovery"><section className="listing wrap" id="events"><SectionTitle kicker="FEATURED EVENTS" title="Trending" accent="Events" desc="Happening Near You"/><div className="title-sub">Explore the most exciting events and book your tickets before they’re gone!</div><CarouselButtons/><div className="cards">{featuredEvents.map(e=><EventCard e={e} key={e.id}/>)}</div></section><section className="listing wrap" id="venues"><SectionTitle kicker="POPULAR VENUES" title="Extraordinary" accent="Venues" desc="for Your Special Occasions"/><div className="title-sub">From luxury banquet halls to outdoor spaces, find the perfect venue for weddings, parties, corporate events and more.</div><CarouselButtons/><div className="cards">{featuredVenues.map(v=><VenueCard v={v} key={v.name}/>)}</div></section></main>}
 
 const benefits=[['Wide Variety','Thousands of events and venues',Sparkles],['Best Prices','Exclusive deals and offers',Tag],['Secure Booking','Safe & reliable payments',ShieldCheck],['24/7 Support','Always here to help you',Headphones]];
 function Why(){return <section className="why"><div className="wrap why-grid"><div className="why-copy"><p className="eyebrow">WHY EVENTORIA?</p><h2>More Than Just Events & Venues</h2><p>A complete platform for event discovery, venue booking, and seamless event management.</p><div className="benefits">{benefits.map(([a,b,I])=><div key={a}><i><I/></i><b>{a}</b><span>{b}</span></div>)}</div></div><div className="why-image" style={{backgroundImage:`url(${img.why})`}}><p>Good<br/>Celebrations<br/><em>Never end!</em></p></div></div></section>}
@@ -104,7 +95,9 @@ function Footer(){return <SiteFooter/>}
 
 function HomePage(){return <><Hero/><Categories/><Listings/><Why/><Wedding/><Testimonials/><CTA/><Footer/></>}
 
-export function App(){return <Routes><Route path="/" element={<HomePage/>}/><Route path="/discover" element={<CatalogPage/>}/><Route path="/venues" element={<VenuesPage/>}/><Route path="/organize" element={<OrganizePage/>}/><Route path="/list-venue" element={<ListVenuePage/>}/><Route path="/auth/:mode" element={<AuthPage/>}/><Route path="/booking/:eventId" element={<BookingPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/><Route path="*" element={<main className="state-message"><h1>Page not found</h1><Link to="/">Return home</Link></main>}/></Routes>}
+function ScrollToTop(){const {pathname}=useLocation();React.useLayoutEffect(()=>{window.scrollTo({top:0,left:0,behavior:'auto'})},[pathname]);return null}
+
+export function App(){return <Routes><Route path="/" element={<HomePage/>}/><Route path="/discover" element={<CatalogPage/>}/><Route path="/venues" element={<VenuesPage/>}/><Route path="/organize" element={<OrganizePage/>}/><Route path="/list-venue" element={<ListVenuePage/>}/><Route path="/auth/:mode" element={<AuthPage/>}/><Route path="/booking/:eventId" element={<BookingPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/><Route path="/portal/:portal" element={<RolePortalPage/>}/><Route path="/scanner" element={<TicketScannerPage/>}/><Route path="*" element={<main className="state-message"><h1>Page not found</h1><Link to="/">Return home</Link></main>}/></Routes>}
 
 const rootElement=document.getElementById('root');
-if(rootElement) createRoot(rootElement).render(<BrowserRouter><AuthProvider><App/></AuthProvider></BrowserRouter>);
+if(rootElement) createRoot(rootElement).render(<BrowserRouter><ScrollToTop/><AuthProvider><App/></AuthProvider></BrowserRouter>);

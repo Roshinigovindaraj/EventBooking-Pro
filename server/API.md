@@ -10,6 +10,23 @@ All errors use:
 
 Protected endpoints require `Authorization: Bearer <access-token>`. Refresh tokens are HttpOnly cookies scoped to `/api/v1/auth`.
 
+## Role access and frontend workspaces
+
+| Persona | Required role | Frontend workspace | Primary API scope |
+| --- | --- | --- | --- |
+| Guest | none | `/`, `/discover`, `/venues` | public catalog only |
+| Customer | `customer` | `/dashboard` | own bookings, venue reservations, wishlist and profile |
+| Event Organizer | `event_organizer` | `/portal/organizer` | own events, bookings and attendees |
+| Venue Owner | `venue_owner` | `/portal/venue-owner` | own venues and reservation requests |
+| Event Staff | `event_staff` | `/portal/event-staff` | assigned events and ticket check-in |
+| Venue Staff | `venue_staff` | `/portal/venue-staff` | assigned operational tasks |
+| Admin | `admin` | `/portal/admin` | users, applications, listing approvals and audit logs |
+| Super Admin | `super_admin` | `/portal/super-admin` | all admin modules plus role assignment |
+
+Frontend workspace guards and backend `authorize(...)` checks both enforce this matrix. Assign privileged roles through `PATCH /super-admin/users/:id/roles`; adding a role never removes customer access unless the submitted role array intentionally excludes it.
+
+For local/development role testing, run `npm run seed:roles` inside `server`. This creates isolated `@eventoria.local` accounts for every workspace. These accounts and their shared temporary password must not be used in production.
+
 ## Public and authentication
 
 - `GET /health`
@@ -28,12 +45,15 @@ Protected endpoints require `Authorization: Bearer <access-token>`. Refresh toke
 - `GET /bookings/me`
 - `POST /bookings`
 - `GET /bookings/:id`
+- `PATCH /bookings/:id/cancel`
 - `POST /venue-reservations`
 - `GET /venue-reservations/me`
 - `GET|POST /wishlist`
 - `DELETE /wishlist/:id`
 - `POST /payments/create-order`
 - `POST /payments/mock-confirm` — non-production mock mode only
+- `POST /payments/razorpay/order` — creates an order from `{ "bookingId": "<booking object id>" }`
+- `POST /payments/razorpay/verify` — verifies payment, confirms the booking, and issues tickets
 
 ## Marketplace applications
 
@@ -54,6 +74,7 @@ Protected endpoints require `Authorization: Bearer <access-token>`. Refresh toke
 
 ## Staff and administration
 
+- `GET /event-staff/assignments`
 - `POST /tickets/check-in`
 - `GET /venue-staff/tasks`
 - `PATCH /venue-staff/tasks/:id`

@@ -10,7 +10,8 @@ import { AuditLog } from '../models/AuditLog.js';
 import { AppError } from '../utils/errors.js';
 
 const router = Router();
-router.use(['/tickets', '/venue-staff'], authenticate);
+router.use(['/tickets', '/event-staff', '/venue-staff'], authenticate);
+router.get('/event-staff/assignments', authorize('event_staff'), async (req, res, next) => { try { res.json({ items: await StaffAssignment.find({ staff: req.user.id, scopeType: 'event', status: 'active' }).populate('event', 'title startsAt endsAt venueName location images').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 router.post('/tickets/check-in', authorize('event_staff', 'event_organizer', 'admin', 'super_admin'), validate(z.object({ body: z.object({ eventId: z.string().regex(/^[a-f\d]{24}$/i), credential: z.string().min(32).max(200) }) })), async (req, res, next) => {
   try {
     if (req.user.roles.includes('event_staff')) {

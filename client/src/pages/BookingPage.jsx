@@ -1,7 +1,7 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
-import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, CreditCard, Download, Landmark, MapPin, Minus, Plus, ShieldCheck, Smartphone, Ticket, WalletCards } from "lucide-react";
+import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, CreditCard, Download, Landmark, MapPin, Minus, Plus, Share2, ShieldCheck, Smartphone, Ticket, WalletCards } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { apiRequest } from "../services/apiClient.js";
 import { Topbar, eventData } from "./public/CatalogPage.jsx";
@@ -44,9 +44,9 @@ export default function BookingPage() {
     if (!booking) { setQrCodeUrl(""); return undefined; }
     let active = true;
     QRCode.toDataURL(ticketQrPayload(booking), {
-      errorCorrectionLevel: "H",
-      margin: 2,
-      width: 240,
+      errorCorrectionLevel: "M",
+      margin: 4,
+      width: 320,
       color: { dark: "#09172e", light: "#ffffff" },
     }).then((url) => { if (active) setQrCodeUrl(url); })
       .catch(() => { if (active) setQrCodeUrl(""); });
@@ -70,20 +70,27 @@ export default function BookingPage() {
     if (coupon.trim().toUpperCase() === "EVENT10") { setCouponApplied(true); setCouponError(""); }
     else { setCouponApplied(false); setCouponError("Use EVENT10 for 10% off"); }
   };
-  const confirmBooking = (paymentDetails = {}) => {
+  const confirmBooking = (paymentDetails = {}, persistedBooking = null) => {
       const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
       const key = `eventoria:bookings:${owner}`;
       const current = JSON.parse(localStorage.getItem(key) || "[]");
-      const confirmed = { id: `EVT-${Date.now()}`, eventId: event.id, title: event.title, image: event.image, date: dateLabel, time: event.time, venue: event.venue, city: event.city, price: money(total), quantity, ticketType, payment: paymentDetails.provider || payment, paymentId: paymentDetails.paymentId, orderId: paymentDetails.orderId, status: "Confirmed", bookedAt: new Date().toISOString() };
+      const confirmed = { id: persistedBooking?.bookingReference || `EVT-${Date.now()}`, backendId: persistedBooking?._id, eventId: persistedBooking?.event || event.id, customerName: user.name, title: event.title, image: event.image, date: dateLabel, time: event.time, venue: event.venue, city: event.city, price: money(total), quantity, ticketType, tickets: paymentDetails.tickets || [], payment: paymentDetails.provider || payment, paymentId: paymentDetails.paymentId, orderId: paymentDetails.orderId, status: "Confirmed", bookedAt: persistedBooking?.createdAt || new Date().toISOString() };
       localStorage.setItem(key, JSON.stringify([confirmed, ...current]));
       setBooking(confirmed); setProcessing(false); setStep(3);
   };
   const pay = async () => {
     setProcessing(true); setPaymentError("");
     try {
-      const result = await apiRequest("/payments/razorpay/order", { method: "POST", body: JSON.stringify({ amountMinor: total * 100, receipt: `evt_${event.id}_${Date.now()}`.slice(0, 40) }) });
+      const catalogResult = await apiRequest(`/events?q=${encodeURIComponent(event.title)}&limit=50`);
+      const backendEvent = catalogResult.items?.find((item) => item.title.toLowerCase() === event.title.toLowerCase());
+      if (!backendEvent) throw new Error("This event is not available in the backend catalog. Run the catalog seed and try again.");
+      const backendTicketType = backendEvent.ticketTypes?.find((type) => type.name === ticketType);
+      if (!backendTicketType) throw new Error(`${ticketType} is not configured for this event.`);
+      const created = await apiRequest("/bookings", { method: "POST", body: JSON.stringify({ eventId: backendEvent._id, ticketTypeId: backendTicketType._id, quantity }) });
+      const result = await apiRequest("/payments/razorpay/order", { method: "POST", body: JSON.stringify({ bookingId: created.booking._id }) });
       if (result.order.provider === "mock") {
-        window.setTimeout(() => confirmBooking({ provider: "Development mock" }), 500);
+        const confirmation = await apiRequest("/payments/mock-confirm", { method: "POST", body: JSON.stringify({ bookingId: created.booking._id }) });
+        confirmBooking({ provider: "Development mock", tickets: confirmation.tickets }, confirmation.booking);
         return;
       }
       if (!await loadRazorpay()) throw new Error("Unable to load Razorpay Checkout. Check your internet connection.");
@@ -101,9 +108,9 @@ export default function BookingPage() {
         modal: { ondismiss: () => setProcessing(false) },
         handler: async (response) => {
           try {
-            const verified = await apiRequest("/payments/razorpay/verify", { method: "POST", body: JSON.stringify({ orderId: result.order.id, paymentId: response.razorpay_payment_id, signature: response.razorpay_signature }) });
+            const verified = await apiRequest("/payments/razorpay/verify", { method: "POST", body: JSON.stringify({ bookingId: created.booking._id, orderId: result.order.id, paymentId: response.razorpay_payment_id, signature: response.razorpay_signature }) });
             if (!verified.verified) throw new Error("Payment could not be verified.");
-            confirmBooking({ provider: "Razorpay", paymentId: verified.paymentId, orderId: verified.orderId });
+            confirmBooking({ provider: "Razorpay", paymentId: verified.paymentId, orderId: verified.orderId, tickets: verified.tickets }, verified.booking);
           } catch (error) { setPaymentError(error.message); setProcessing(false); }
         },
       });
@@ -112,6 +119,11 @@ export default function BookingPage() {
     } catch (error) { setPaymentError(error.message); setProcessing(false); }
   };
   const downloadTicket = () => downloadEventTickets(booking);
+  const shareTicket = async () => {
+    const text = `${booking.customerName} · ${booking.title} · ${booking.date} · Booking ${booking.id}`;
+    if (navigator.share) await navigator.share({ title: "Eventoria E-Ticket", text }).catch(() => null);
+    else await navigator.clipboard?.writeText(text);
+  };
 
   return <main className="booking-page"><Topbar active="events"/><section className="booking-wrap">
     <button className="booking-back" onClick={() => navigate("/discover")}><ArrowLeft/> Back to events</button>
@@ -124,6 +136,16 @@ export default function BookingPage() {
       : <div className="booking-options"><h2>Select Payment Method</h2><div className="payment-methods">{paymentMethods.map(([name, Icon]) => <button className={payment === name ? "active" : ""} onClick={() => setPayment(name)} key={name}><Icon/><span>{name}</span></button>)}</div><div className="payment-note"><ShieldCheck/><span><b>Secured by Razorpay</b><small>Payment is verified securely before your booking is confirmed.</small></span></div>{paymentError&&<div className="payment-error">{paymentError}</div>}<div className="checkout-actions"><button onClick={() => setStep(1)}>Back</button><button className="booking-primary" disabled={processing} onClick={pay}>{processing ? "Opening Razorpay…" : `Pay ${money(total)} Securely`} <ArrowRight/></button></div></div>}
     </section><aside className="price-panel"><h2>Price Breakdown</h2><dl><div><dt>{ticketType} × {quantity}</dt><dd>{money(subtotal)}</dd></div><div><dt>Taxes & fees</dt><dd>{money(fees)}</dd></div>{couponApplied&&<div className="discount"><dt>Coupon discount</dt><dd>− {money(discount)}</dd></div>}<div className="total"><dt>Total Amount</dt><dd>{money(total)}</dd></div></dl><label>Apply coupon code<div><input value={coupon} onChange={(e) => setCoupon(e.target.value)} placeholder="Enter coupon"/><button onClick={applyCoupon}>Apply</button></div></label>{couponApplied&&<p className="coupon-success"><Check/> EVENT10 applied</p>}{couponError&&<p className="coupon-error">{couponError}</p>}</aside></div>}
 
-    {step === 3 && booking && <section className="booking-success"><div className="success-mark"><Check/></div><p>PAYMENT SUCCESSFUL</p><h2>Booking Confirmed!</h2><span>A confirmation has been created for your Eventoria account.</span><article className="ticket-card"><div className="ticket-event"><img src={booking.image} alt=""/><div><b>{booking.title}</b><small>{booking.date} · {booking.time}</small><small>{booking.venue}, {booking.city}</small></div></div><div className="ticket-qr">{qrCodeUrl ? <img src={qrCodeUrl} alt={`QR code for ticket ${booking.id}-P01`}/> : <span>Generating QR code…</span>}</div><dl><div><dt>Booking ID</dt><dd>{booking.id}</dd></div><div><dt>Ticket Type</dt><dd>{booking.ticketType}</dd></div><div><dt>Quantity</dt><dd>{booking.quantity} unique {booking.quantity === 1 ? "ticket" : "tickets"}</dd></div><div><dt>Total Paid</dt><dd>{booking.price}</dd></div></dl></article><div className="success-actions"><button onClick={downloadTicket}><Download/> Download {booking.quantity > 1 ? `${booking.quantity} E-Tickets` : "E-Ticket"}</button><button className="booking-primary" onClick={() => navigate("/dashboard")}>View My Bookings <ArrowRight/></button></div></section>}
+    {step === 3 && booking && <section className="booking-success">
+      <div className="success-mark"><Check/></div><p>PAYMENT SUCCESSFUL</p><h2>Booking Confirmed!</h2><span>A confirmation has been created for your Eventoria account.</span>
+      <article className="ticket-card ticket-voucher">
+        <header><Ticket/><b>E-Ticket / Booking Voucher</b></header>
+        <div className="ticket-event"><img src={booking.image} alt=""/><div><b>{booking.title}</b><small>{booking.date} · {booking.time}</small><small>{booking.venue}, {booking.city}</small></div></div>
+        <div className="ticket-qr">{qrCodeUrl ? <img src={qrCodeUrl} alt={`QR code for ticket ${booking.id}-P01`}/> : <span>Generating QR code…</span>}</div>
+        <dl><div><dt>Booking ID</dt><dd>{booking.id}</dd></div><div><dt>Name</dt><dd>{booking.customerName || user.name}</dd></div><div><dt>Ticket Type</dt><dd>{booking.ticketType}</dd></div><div><dt>Quantity</dt><dd>{booking.quantity}</dd></div><div><dt>Seat / Entry</dt><dd>{booking.ticketType === "General Admission" ? "GA - Standing" : booking.ticketType}</dd></div><div><dt>Total Paid</dt><dd>{booking.price}</dd></div></dl>
+        <footer><button onClick={downloadTicket}><Download/> Download</button><button onClick={shareTicket}><Share2/> Share</button></footer>
+      </article>
+      <div className="success-actions"><button className="booking-primary" onClick={() => navigate("/dashboard")}>View My Bookings <ArrowRight/></button></div>
+    </section>}
   </section><SiteFooter/></main>;
 }
