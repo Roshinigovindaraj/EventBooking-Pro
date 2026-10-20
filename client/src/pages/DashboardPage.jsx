@@ -1,6 +1,6 @@
 import React from "react";
 import { CalendarDays, Heart, Mail, MapPin, ShieldCheck, Ticket, Trash2, UserRound, Users } from "lucide-react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Topbar, eventData } from "./public/CatalogPage.jsx";
 import { venueData } from "./public/VenuesPage.jsx";
@@ -36,6 +36,17 @@ const normalizeBackendBooking = (booking, customerName) => {
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const handleInternalNavigation = (event) => {
+    const link = event.target.closest('a[href^="/"]');
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(link.getAttribute('href'));
+  };
+  React.useEffect(() => {
+    document.addEventListener('click', handleInternalNavigation);
+    return () => document.removeEventListener('click', handleInternalNavigation);
+  });
   const [wishlist, setWishlist] = React.useState([]);
   const [bookings, setBookings] = React.useState([]);
   const [bookingError, setBookingError] = React.useState("");

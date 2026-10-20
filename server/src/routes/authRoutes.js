@@ -10,7 +10,8 @@ const credentials = z.object({ body: z.object({ email: z.string().email().max(25
 const registration = z.object({ body: credentials.shape.body.extend({ name: z.string().trim().min(2).max(80) }) });
 const forgotPassword = z.object({ body: z.object({ email: z.string().email().max(254) }) });
 const passwordReset = z.object({ body: z.object({ token: z.string().min(32).max(256), password: z.string().min(10).max(128) }) });
-const cookieOptions = { httpOnly: true, secure: env.COOKIE_SECURE, sameSite: env.COOKIE_SECURE ? 'none' : 'lax', maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86400000, path: '/api/v1/auth' };
+const crossSiteCookie = env.COOKIE_SECURE || env.NODE_ENV === 'production';
+const cookieOptions = { httpOnly: true, secure: crossSiteCookie, sameSite: crossSiteCookie ? 'none' : 'lax', maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86400000, path: '/api/v1/auth' };
 
 router.post('/register', validate(registration), async (req, res, next) => {
   try {
