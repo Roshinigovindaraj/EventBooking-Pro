@@ -30,4 +30,3 @@ Verify the deployment before testing registration:
 https://YOUR-BACKEND-HOST/api/v1/health
 ```
 
-It should return `{"status":"ok","service":"eventoria-api"}`.

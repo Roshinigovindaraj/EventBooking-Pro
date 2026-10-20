@@ -3,7 +3,6 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
-import { env } from './config/env.js';
 import authRoutes from './routes/authRoutes.js';
 import catalogRoutes from './routes/catalogRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
@@ -18,14 +17,10 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 export const app = express();
 app.disable('x-powered-by');
 app.use(helmet());
-const normalizeOrigin = origin => origin.trim().replace(/\/$/, '');
-const configuredOrigins = new Set(env.CLIENT_URL.split(',').map(normalizeOrigin).filter(Boolean));
-const isLocalDevelopmentOrigin = origin => env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
 app.use(cors({
-  origin(origin, callback) {
-    if (!origin || configuredOrigins.has(normalizeOrigin(origin)) || isLocalDevelopmentOrigin(origin)) return callback(null, true);
-    return callback(new Error(`Origin ${origin} is not allowed by CORS`));
-  },
+  // Reflect every requesting origin. `*` cannot be used with credentialed
+  // requests, so `true` is the CORS package's allow-all equivalent here.
+  origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
