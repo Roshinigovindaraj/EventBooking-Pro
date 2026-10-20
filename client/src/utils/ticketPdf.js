@@ -1,4 +1,5 @@
 import QRCode from "qrcode";
+import { getApiBaseUrl } from "../services/apiClient.js";
 
 export const canDownloadEventTickets = (booking) =>
   Boolean(booking) && ["confirmed", "rescheduled"].includes(String(booking.status || "").trim().toLowerCase());
@@ -9,8 +10,10 @@ export const ticketQrPayload = (booking, attendeeNumber = 1) => {
   if (!issuedTicket?.credential) {
     return JSON.stringify({ type: "eventoria-ticket", ticketId, eventId: booking.eventId, credential: null });
   }
-  const apiBaseUrl = import.meta.env.VITE_API_URL || window.location.origin.replace(/:\d+$/, ':5000');
-  return `${apiBaseUrl}/api/v1/public/tickets/lookup?credential=${encodeURIComponent(issuedTicket.credential)}`;
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) throw new Error("API is not configured. Set VITE_API_BASE_URL before generating tickets.");
+  const absoluteApiBaseUrl = new URL(apiBaseUrl, window.location.origin).href.replace(/\/$/, "");
+  return `${absoluteApiBaseUrl}/public/tickets/lookup?credential=${encodeURIComponent(issuedTicket.credential)}`;
 };
 
 const drawTicketBase = (pdf) => {

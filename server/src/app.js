@@ -18,15 +18,17 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 export const app = express();
 app.disable('x-powered-by');
 app.use(helmet());
-const configuredOrigins = new Set(env.CLIENT_URL.split(',').map(origin => origin.trim()).filter(Boolean));
+const normalizeOrigin = origin => origin.trim().replace(/\/$/, '');
+const configuredOrigins = new Set(env.CLIENT_URL.split(',').map(normalizeOrigin).filter(Boolean));
 const isLocalDevelopmentOrigin = origin => env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || configuredOrigins.has(origin) || isLocalDevelopmentOrigin(origin)) return callback(null, true);
-    return callback(null, false);
+    if (!origin || configuredOrigins.has(normalizeOrigin(origin)) || isLocalDevelopmentOrigin(origin)) return callback(null, true);
+    return callback(new Error(`Origin ${origin} is not allowed by CORS`));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());

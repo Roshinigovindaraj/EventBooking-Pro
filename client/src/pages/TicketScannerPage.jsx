@@ -24,13 +24,7 @@ export default function TicketScannerPage() {
     setTicketData(null);
     
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/v1/public/tickets/lookup?credential=${encodeURIComponent(credential)}`);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error?.message || "Failed to lookup ticket");
-      }
-      
+      const data = await apiRequest(`/public/tickets/lookup?credential=${encodeURIComponent(credential)}`);
       setTicketData(data);
     } catch (err) {
       setError(err.message);

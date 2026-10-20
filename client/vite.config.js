@@ -3,11 +3,13 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5173 },
-  preview: { port: 4173 },
-  define: {
-    'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL || 'http://localhost:5000'),
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': 'http://localhost:5000',
+    },
   },
+  preview: { port: 4173 },
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.js',
