@@ -12,6 +12,8 @@ VITE_API_BASE_URL=https://YOUR-BACKEND-HOST/api/v1
 
 The URL must be the public HTTPS address of the deployed Express server, not `localhost`. Redeploy after changing a `VITE_*` variable because Vite embeds it during the build.
 
+The `client/vercel.json` rewrite sends direct requests for React routes (for example `/portal/organizer`, `/auth/login`, and `/booking/123`) to `index.html`. Keep the Vercel project root set to `client` so this configuration is applied.
+
 ## Backend
 
 Set the backend root to `server`, use `npm start`, and configure all variables from `server/.env.example`. In particular:
