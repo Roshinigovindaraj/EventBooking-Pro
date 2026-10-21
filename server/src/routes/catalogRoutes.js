@@ -10,7 +10,9 @@ const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 router.get('/events', async (req, res, next) => {
   try {
-    const filter = { status: 'published', startsAt: { $gte: new Date() } };
+    // Keep an approved event discoverable while it is in progress. Filtering by
+    // startsAt hid an event the moment its start time passed, even before endsAt.
+    const filter = { status: 'published', endsAt: { $gte: new Date() } };
     if (req.query.category) filter.category = new RegExp(`^${escapeRegex(String(req.query.category))}$`, 'i');
     if (req.query.subcategory) filter.subcategory = new RegExp(`^${escapeRegex(String(req.query.subcategory))}$`, 'i');
     if (req.query.location) filter['location.city'] = new RegExp(escapeRegex(String(req.query.location)), 'i');

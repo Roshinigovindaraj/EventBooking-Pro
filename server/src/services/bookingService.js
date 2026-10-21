@@ -14,7 +14,7 @@ export async function createEventBooking({ customerId, eventId, ticketTypeId, qu
     let created;
     await session.withTransaction(async () => {
       const now = new Date();
-      const event = await Event.findOne({ _id: eventId, status: 'published', startsAt: { $gt: now } }).session(session);
+      const event = await Event.findOne({ _id: eventId, status: 'published', endsAt: { $gt: now } }).session(session);
       const type = event?.ticketTypes.id(ticketTypeId);
       if (!event || !type) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Bookable event or ticket type not found');
       if (quantity < type.minPerOrder || quantity > type.maxPerOrder) throw new AppError(422, 'INVALID_QUANTITY', `Quantity must be between ${type.minPerOrder} and ${type.maxPerOrder}`);

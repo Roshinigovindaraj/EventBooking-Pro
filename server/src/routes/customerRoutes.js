@@ -48,6 +48,14 @@ router.patch('/bookings/:id/cancel', async (req, res, next) => {
   } catch (e) { next(e); }
   finally { await session.endSession(); }
 });
+router.post('/bookings/:id/refund-request', validate(z.object({ body: z.object({ reason: z.string().trim().min(5).max(1000) }) })), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOne({ _id: req.params.id, customer: req.user.id, status: 'confirmed', paymentStatus: 'successful', refundStatus: { $in: ['none', 'rejected'] } });
+    if (!booking) throw new AppError(409, 'REFUND_NOT_AVAILABLE', 'This booking is not eligible for a refund request');
+    booking.refundStatus = 'requested'; booking.refundReason = req.body.reason; booking.refundRequestedAt = new Date(); booking.refundFeedback = null;
+    await booking.save(); res.json({ booking });
+  } catch (e) { next(e); }
+});
 
 router.post('/venue-reservations', validate(z.object({ body: z.object({ venueId: z.string().regex(/^[a-f\d]{24}$/i), startsAt: z.string().datetime(), endsAt: z.string().datetime(), purpose: z.string().trim().min(3).max(300) }) })), async (req, res, next) => { try { res.status(201).json({ reservation: await createVenueReservation({ customerId: req.user.id, ...req.body }) }); } catch (e) { next(e); } });
 router.get('/venue-reservations/me', async (req, res, next) => { try { res.json({ items: await VenueReservation.find({ customer: req.user.id }).populate('venue', 'name location images').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });

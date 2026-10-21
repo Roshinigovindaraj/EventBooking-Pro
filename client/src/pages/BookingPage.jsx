@@ -30,7 +30,7 @@ export default function BookingPage() {
   const event = location.state?.event || eventData.find((item) => String(item.id) === String(eventId));
   const [step, setStep] = React.useState(1);
   const [quantity, setQuantity] = React.useState(1);
-  const [ticketType, setTicketType] = React.useState("General Admission");
+  const [ticketType, setTicketType] = React.useState(event?.ticketTypes?.[0]?.name || "General Admission");
   const [coupon, setCoupon] = React.useState("");
   const [couponApplied, setCouponApplied] = React.useState(false);
   const [couponError, setCouponError] = React.useState("");
@@ -57,8 +57,9 @@ export default function BookingPage() {
   if (!user) return <Navigate to="/auth/login" replace state={{ from: `/booking/${eventId}`, event }}/>; 
   if (!event) return <Navigate to="/discover" replace/>;
 
-  const basePrice = numericPrice(event.price);
-  const typeExtra = ticketType === "Premium" ? 500 : ticketType === "VIP" ? 1000 : 0;
+  const selectedTicket = event.ticketTypes?.find(type => type.name === ticketType);
+  const basePrice = selectedTicket ? selectedTicket.priceMinor / 100 : numericPrice(event.price);
+  const typeExtra = event.ticketTypes?.length ? 0 : ticketType === "Premium" ? 500 : ticketType === "VIP" ? 1000 : 0;
   const subtotal = (basePrice + typeExtra) * quantity;
   const fees = Math.round(subtotal * .05);
   const discount = couponApplied ? Math.round(subtotal * .1) : 0;
@@ -81,9 +82,9 @@ export default function BookingPage() {
   const pay = async () => {
     setProcessing(true); setPaymentError("");
     try {
-      const catalogResult = await apiRequest(`/events?q=${encodeURIComponent(event.title)}&limit=50`);
-      const backendEvent = catalogResult.items?.find((item) => item.title.toLowerCase() === event.title.toLowerCase());
-      if (!backendEvent) throw new Error("This event is not available in the backend catalog. Run the catalog seed and try again.");
+      const catalogResult = await apiRequest(`/events/${event.id}`);
+      const backendEvent = catalogResult.item;
+      if (!backendEvent) throw new Error("This event is no longer available for booking.");
       const backendTicketType = backendEvent.ticketTypes?.find((type) => type.name === ticketType);
       if (!backendTicketType) throw new Error(`${ticketType} is not configured for this event.`);
       const created = await apiRequest("/bookings", { method: "POST", body: JSON.stringify({ eventId: backendEvent._id, ticketTypeId: backendTicketType._id, quantity }) });

@@ -22,7 +22,12 @@ Set the backend root to `server`, use `npm start`, and configure all variables f
 NODE_ENV=production
 CLIENT_URL=https://event-booking-pro.vercel.app
 COOKIE_SECURE=true
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
 ```
+
+Create the Cloudinary credentials in **Cloudinary Console → Settings → API Keys**. Add all three values only to the backend host; never expose `CLOUDINARY_API_SECRET` through a `VITE_*` frontend variable. Organizer uploads are stored in the `eventoria/events` Cloudinary folder.
 
 For Vercel preview deployments, add each trusted preview origin to the comma-separated `CLIENT_URL`; do not use `*` with credentialed requests.
 

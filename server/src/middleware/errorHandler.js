@@ -6,7 +6,8 @@ export function notFoundHandler(req, _res, next) {
 
 export function errorHandler(error, _req, res, _next) {
   if (error?.name === 'ZodError') {
-    return res.status(422).json({ error: { code: 'VALIDATION_ERROR', message: 'Request validation failed', details: error.flatten() } });
+    const issues = error.issues.map(issue => ({ field: issue.path.filter(part => part !== 'body').join('.') || 'request', message: issue.message }));
+    return res.status(422).json({ error: { code: 'VALIDATION_ERROR', message: issues.map(issue => `${issue.field}: ${issue.message}`).join(' · '), details: { issues } } });
   }
   if (error?.name === 'ValidationError') {
     return res.status(422).json({ error: { code: 'VALIDATION_ERROR', message: error.message } });

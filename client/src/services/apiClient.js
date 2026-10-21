@@ -14,6 +14,7 @@ export function getApiBaseUrl() {
   return API_BASE_URL;
 }
 let accessToken = null;
+let refreshPromise = null;
 
 export function setAccessToken(token) {
   accessToken = token;
@@ -31,6 +32,22 @@ export async function apiRequest(path, options = {}) {
     response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, credentials: 'include' });
   } catch (cause) {
     throw new Error(`Cannot reach the API at ${API_BASE_URL}. Check VITE_API_BASE_URL and the API CORS settings.`, { cause });
+  }
+  if (response.status === 401 && path !== '/auth/refresh' && options.retryAuth !== false) {
+    refreshPromise ||= fetch(`${API_BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+      .then(async refreshResponse => {
+        if (!refreshResponse.ok) throw new Error('Authentication is required');
+        const result = await refreshResponse.json();
+        setAccessToken(result.accessToken);
+        return result;
+      })
+      .finally(() => { refreshPromise = null; });
+    try {
+      await refreshPromise;
+      return apiRequest(path, { ...options, retryAuth: false });
+    } catch {
+      setAccessToken(null);
+    }
   }
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => ({}));

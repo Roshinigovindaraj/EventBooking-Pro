@@ -19,6 +19,9 @@ const schema = z.object({
   PAYMENT_WEBHOOK_SECRET: z.string().min(16),
   RAZORPAY_KEY_ID: z.preprocess(value => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().trim().regex(/^rzp_(test|live)_[A-Za-z0-9]+$/).optional()),
   RAZORPAY_KEY_SECRET: z.preprocess(value => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().trim().min(20).optional()),
+  CLOUDINARY_CLOUD_NAME: z.string().trim().min(1).optional(),
+  CLOUDINARY_API_KEY: z.string().trim().min(1).optional(),
+  CLOUDINARY_API_SECRET: z.string().trim().min(1).optional(),
 });
 
 const parsed = schema.safeParse(process.env);

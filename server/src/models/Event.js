@@ -27,10 +27,14 @@ const eventSchema = new mongoose.Schema({
   endsAt: { type: Date, required: true },
   timezone: { type: String, default: 'Asia/Kolkata' },
   images: [String],
+  terms: { type: String, maxlength: 5000 },
+  benefits: [{ type: String, maxlength: 200 }],
+  faqs: [{ question: { type: String, maxlength: 300 }, answer: { type: String, maxlength: 1000 } }],
   ticketTypes: { type: [ticketTypeSchema], default: [] },
   status: { type: String, enum: ['draft', 'pending_review', 'approved', 'published', 'rejected', 'cancelled', 'suspended'], default: 'draft', index: true },
   publishedAt: Date,
   approvalFeedback: String,
+  pausedAt: Date,
 }, { timestamps: true });
 
 eventSchema.index({ title: 'text', description: 'text', category: 'text', subcategory: 'text', venueName: 'text', 'location.city': 'text' });

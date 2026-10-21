@@ -322,7 +322,7 @@ export function Topbar({ home = false, active = home ? "home" : "events" }) {
           <CalendarDays/><span>Events</span>
         </Link>
         <Link className={active === "venues" ? "active" : ""} to="/venues" onClick={() => setOpen(false)}><MapPin/><span>Venues</span></Link>
-        <Link className={active === "organize" ? "active" : ""} to="/organize" onClick={() => setOpen(false)}><Users/><span>Organize Event</span></Link>
+        <Link className={active === "organize" ? "active" : ""} to={user?.roles?.includes('event_organizer') ? '/portal/organizer' : '/organize#become-organizer'} onClick={() => setOpen(false)}><Users/><span>{user?.roles?.includes('event_organizer') ? 'Manage Events' : 'Become an Organizer'}</span></Link>
         <Link className={active === "list" ? "active" : ""} to="/list-venue" onClick={() => setOpen(false)}><Store/><span>List Your Venue</span></Link>
       </nav>
       <div className="evx-account">
@@ -486,7 +486,7 @@ export default function CatalogPage() {
   const [guestNotice, setGuestNotice] = React.useState("");
   React.useEffect(() => {
     let active = true;
-    const load = () => apiRequest('/events?limit=50').then((result) => { if (active && result.items?.length) setCatalogEvents(result.items.map(publicEvent)); }).catch(() => null);
+    const load = () => apiRequest('/events?limit=50').then((result) => { if (active && result.items?.length) setCatalogEvents(result.items.map((item, index) => ({ ...publicEvent(item, index), endsAt: item.endsAt, ticketTypes: item.ticketTypes || [] }))); }).catch(() => null);
     load(); window.addEventListener('eventoria:data-changed', load); window.addEventListener('focus', load);
     return () => { active = false; window.removeEventListener('eventoria:data-changed', load); window.removeEventListener('focus', load); };
   }, []);

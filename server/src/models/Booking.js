@@ -12,6 +12,11 @@ const bookingSchema = new mongoose.Schema({
   currency: { type: String, required: true },
   status: { type: String, enum: ['pending_payment', 'confirmed', 'expired', 'cancelled', 'refunded'], default: 'pending_payment', index: true },
   paymentStatus: { type: String, enum: ['pending', 'successful', 'failed', 'cancelled', 'refunded'], default: 'pending' },
+  refundStatus: { type: String, enum: ['none', 'requested', 'approved', 'rejected', 'processed'], default: 'none', index: true },
+  refundReason: { type: String, maxlength: 1000 },
+  refundFeedback: { type: String, maxlength: 1000 },
+  refundRequestedAt: Date,
+  refundedAt: Date,
   reservationExpiresAt: { type: Date, required: true, index: true },
   bookingReference: { type: String, required: true, unique: true },
 }, { timestamps: true });
