@@ -2,8 +2,29 @@ import React, { useEffect, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { apiRequest } from "../services/apiClient.js";
-import { Camera, Scan, User, Calendar, Ticket as TicketIcon, CheckCircle, XCircle, Clock, Users, ArrowRight } from "lucide-react";
+import { Camera, Scan, User, Calendar, Ticket as TicketIcon, CheckCircle, XCircle, Clock, Users, ArrowRight, Upload, SwitchCamera } from "lucide-react";
 import { Topbar } from "./public/CatalogPage.jsx";
+import jsQR from "jsqr";
+
+const playBeep = () => {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.18);
+  } catch {
+    /* Silent if audio context not permitted */
+  }
+};
 
 export default function TicketScannerPage() {
   const { user, loading } = useAuth();
@@ -14,36 +35,205 @@ export default function TicketScannerPage() {
   const [scanning, setScanning] = useState(false);
   const [admitting, setAdmitting] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
-  const [cameraError, setCameraError] = useState('');
+  const [cameraError, setCameraError] = useState("");
+  const [facingMode, setFacingMode] = useState("environment");
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const requestedEventId = searchParams.get('eventId');
+  const scanAnimationRef = useRef(null);
+  const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const requestedEventId = searchParams.get("eventId");
 
   const extractCredential = value => {
     if (!value) return '';
     const trimmed = String(value).trim();
     try {
       const parsed = JSON.parse(trimmed);
-      if (parsed.credential) return parsed.credential;
-      if (parsed.ticketId) return parsed.ticketId;
-      if (parsed.code) return parsed.code;
-      if (parsed.bookingReference) return parsed.bookingReference;
+      if (parsed.credential) return String(parsed.credential);
+      if (parsed.ticketId) return String(parsed.ticketId);
+      if (parsed.code) return String(parsed.code);
+      if (parsed.bookingReference) return String(parsed.bookingReference);
     } catch { /* not JSON */ }
     try {
       const url = new URL(trimmed);
       const cred = url.searchParams.get('credential');
       if (cred) return cred;
+      const bookingRef = url.searchParams.get('booking');
+      if (bookingRef) return bookingRef;
     } catch { /* not a URL */ }
     return trimmed;
   };
 
   const stopCamera = () => {
-    streamRef.current?.getTracks().forEach(track => track.stop());
-    streamRef.current = null;
+    if (scanAnimationRef.current) {
+      cancelAnimationFrame(scanAnimationRef.current);
+      scanAnimationRef.current = null;
+    }
+    if (streamRef.current) {
+      try {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      } catch (err) {
+        console.warn("Track stop error:", err);
+      }
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+      } catch {}
+    }
     setCameraOn(false);
   };
 
-  useEffect(() => () => streamRef.current?.getTracks().forEach(track => track.stop()), []);
+  const scanFrame = () => {
+    if (!streamRef.current || !videoRef.current) return;
+    const video = videoRef.current;
+
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0) {
+      let canvas = canvasRef.current;
+      if (!canvas) {
+        canvas = document.createElement("canvas");
+        canvasRef.current = canvas;
+      }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert",
+        });
+        if (code && code.data) {
+          playBeep();
+          if (navigator.vibrate) {
+            try { navigator.vibrate(120); } catch {}
+          }
+          const scannedValue = extractCredential(code.data);
+          setCredential(scannedValue);
+          stopCamera();
+          handleScan(null, scannedValue);
+          return;
+        }
+      }
+    }
+    scanAnimationRef.current = requestAnimationFrame(scanFrame);
+  };
+
+  const startCamera = async (targetFacingMode = facingMode) => {
+    setCameraError("");
+    setError("");
+    stopCamera();
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      return setCameraError("Camera access is not supported by this browser. Enter the Booking ID or upload a QR image.");
+    }
+
+    try {
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: targetFacingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
+
+      streamRef.current = stream;
+      setCameraOn(true);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute("playsinline", "true");
+        videoRef.current.setAttribute("muted", "true");
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn("Autoplay note:", playErr);
+        }
+      }
+
+      if (scanAnimationRef.current) {
+        cancelAnimationFrame(scanAnimationRef.current);
+      }
+      scanAnimationRef.current = requestAnimationFrame(scanFrame);
+    } catch (cameraFailure) {
+      stopCamera();
+      if (cameraFailure.name === "NotAllowedError" || cameraFailure.name === "PermissionDeniedError") {
+        setCameraError("Camera permission was denied. Please allow camera permissions in your browser or use 'Upload QR'.");
+      } else if (cameraFailure.name === "NotFoundError" || cameraFailure.name === "DevicesNotFoundError") {
+        setCameraError("No camera found on this device. You can upload a QR image or enter the ID manually.");
+      } else {
+        setCameraError(cameraFailure.message || "Camera permission was not granted or camera is busy.");
+      }
+    }
+  };
+
+  const toggleFacingMode = () => {
+    const nextMode = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(nextMode);
+    startCamera(nextMode);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError("");
+    setCameraError("");
+    const reader = new FileReader();
+    reader.onload = (fileEvent) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imgData.data, imgData.width, imgData.height);
+          if (code && code.data) {
+            playBeep();
+            if (navigator.vibrate) {
+              try { navigator.vibrate(120); } catch {}
+            }
+            const extracted = extractCredential(code.data);
+            setCredential(extracted);
+            handleScan(null, extracted);
+          } else {
+            setError("Could not detect a QR code in the uploaded image. Please ensure the QR code is clearly visible or enter the ID manually.");
+          }
+        } catch (err) {
+          setError("Error reading image: " + err.message);
+        }
+      };
+      img.src = fileEvent.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cameraOn && videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.setAttribute("playsinline", "true");
+      videoRef.current.play().catch(() => {});
+    }
+  }, [cameraOn]);
 
   if (loading) return <p className="state-message">Loading…</p>;
   if (!user) return <Navigate to="/auth/login" replace/>;
@@ -69,40 +259,6 @@ export default function TicketScannerPage() {
       setError(err.message || 'Ticket could not be verified');
     } finally {
       setScanning(false);
-    }
-  };
-
-  const startCamera = async () => {
-    setCameraError('');
-    if (!('BarcodeDetector' in window)) {
-      return setCameraError('Camera QR scanning is not supported by this browser. Enter the Booking ID or Ticket Code manually.');
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-      streamRef.current = stream;
-      setCameraOn(true);
-      await new Promise(resolve => setTimeout(resolve, 0));
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      const scanFrame = async () => {
-        if (!streamRef.current || !videoRef.current) return;
-        try {
-          const codes = await detector.detect(videoRef.current);
-          if (codes[0]?.rawValue) {
-            const value = extractCredential(codes[0].rawValue);
-            setCredential(value);
-            stopCamera();
-            handleScan({ preventDefault: () => {} }, value);
-            return;
-          }
-        } catch { /* Continue scanning */ }
-        window.setTimeout(scanFrame, 350);
-      };
-      scanFrame();
-    } catch (cameraFailure) {
-      stopCamera();
-      setCameraError(cameraFailure.message || 'Camera permission was not granted.');
     }
   };
 
@@ -187,21 +343,71 @@ export default function TicketScannerPage() {
               {scanning ? <Clock className="animate-spin" /> : <Scan />}
               {scanning ? "Checking..." : "Verify"}
             </button>
-            <button type="button" onClick={cameraOn ? stopCamera : startCamera} className="scan-btn camera-btn">
-              <Camera /> {cameraOn ? 'Stop Camera' : 'Scan QR Camera'}
+            <button
+              type="button"
+              onClick={cameraOn ? stopCamera : () => startCamera()}
+              className={`scan-btn camera-btn ${cameraOn ? 'active' : ''}`}
+            >
+              <Camera /> {cameraOn ? "Stop Camera" : "Scan QR Camera"}
             </button>
+            <label className="scan-btn upload-btn" title="Upload QR image from device">
+              <Upload size={18} /> Upload QR
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={handleFileUpload}
+              />
+            </label>
           </div>
           <div className="scanner-hints">
-            <span>💡 <b>Accepts:</b> Booking IDs (e.g. <code>EVT-73453260FC</code>), Ticket Codes (<code>TKT-41D4...</code>), or QR scans. Group tickets allow members to enter separately at different times.</span>
+            <span>💡 <b>Accepts:</b> Live Camera QR scan, QR image upload, Booking IDs (e.g. <code>EVT-73453260FC</code>), or Ticket Codes (<code>TKT-41D4...</code>).</span>
           </div>
         </form>
 
-        {cameraOn && (
-          <div className="scanner-camera">
-            <video ref={videoRef} playsInline muted />
-            <span>Hold the QR code inside the camera view</span>
+        {/* Camera Viewfinder (Always in DOM to guarantee videoRef.current exists) */}
+        <div
+          className="scanner-camera-box"
+          style={{ display: cameraOn ? "block" : "none" }}
+        >
+          <div className="camera-viewfinder">
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="camera-video-feed"
+            />
+            <div className="camera-scanner-overlay">
+              <div className="corner corner-tl" />
+              <div className="corner corner-tr" />
+              <div className="corner corner-bl" />
+              <div className="corner corner-br" />
+              <div className="scanner-laser-line" />
+            </div>
           </div>
-        )}
+          <div className="camera-controls">
+            <span className="camera-guide-text">Align attendee QR code inside the target frame</span>
+            <div className="camera-btn-group">
+              <button
+                type="button"
+                onClick={toggleFacingMode}
+                className="btn-camera-action"
+                title="Switch Camera"
+              >
+                <SwitchCamera size={16} /> Switch Camera ({facingMode === "environment" ? "Back" : "Front"})
+              </button>
+              <button
+                type="button"
+                onClick={stopCamera}
+                className="btn-camera-action stop-btn"
+              >
+                <XCircle size={16} /> Close Camera
+              </button>
+            </div>
+          </div>
+        </div>
 
         {cameraError && (
           <div className="error-message">

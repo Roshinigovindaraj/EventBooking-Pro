@@ -18,7 +18,32 @@ const ticketQuery = z.object({ query: z.object({ credential: z.string().trim().m
 const assertEventAccess = async (user, eventId) => {
   if (user.roles.some(role => ['admin', 'super_admin'].includes(role))) return;
   if (user.roles.includes('event_organizer') && await Event.exists({ _id: eventId, organizer: user.id })) return;
-  if (user.roles.includes('event_staff') && await StaffAssignment.exists({ staff: user.id, event: eventId, scopeType: 'event', status: 'active', permissions: 'ticket_check_in' })) return;
+  if (user.roles.includes('event_staff')) {
+    const hasStaffAssignment = await StaffAssignment.exists({
+      staff: user.id,
+      event: eventId,
+      scopeType: 'event',
+      status: 'active',
+      $or: [
+        { permissions: 'ticket_check_in' },
+        { permissions: { $size: 0 } },
+        { permissions: { $exists: false } },
+        { permissions: 'all' },
+      ],
+    });
+    if (hasStaffAssignment) return;
+  }
+  const event = await Event.findById(eventId).select('venue organizer');
+  if (event && user.roles.includes('venue_staff')) {
+    const hasVenueAssign = await StaffAssignment.exists({
+      staff: user.id,
+      venue: event.venue,
+      scopeType: 'venue',
+      status: 'active',
+    });
+    if (hasVenueAssign) return;
+  }
+  if (event && String(event.organizer) === String(user.id)) return;
   throw new AppError(403, 'NOT_ASSIGNED', 'You are not assigned to check in tickets for this event');
 };
 router.get('/event-staff/assignments', authorize('event_staff'), async (req, res, next) => { try { res.json({ items: await StaffAssignment.find({ staff: req.user.id, scopeType: 'event', status: 'active' }).populate('event', 'title startsAt endsAt venueName location images').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
