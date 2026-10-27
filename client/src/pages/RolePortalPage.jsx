@@ -8,6 +8,7 @@ import SiteFooter from '../components/SiteFooter.jsx';
 import OrganizerPortalPage from './OrganizerPortalPage.jsx';
 import AdminPortalPage from './AdminPortalPage.jsx';
 import VenueOwnerPortalPage from './VenueOwnerPortalPage.jsx';
+import VenueStaffPortalPage from './VenueStaffPortalPage.jsx';
 
 const portals = {
   organizer: { role: 'event_organizer', title: 'Event Organizer', icon: CalendarDays, endpoints: [['Events', '/organizer/events'], ['Bookings & Attendees', '/organizer/bookings']], modules: ['Create & manage events', 'Tickets, pricing & offers', 'Bookings & attendees', 'Check-in & attendance', 'Reports & analytics'] },
@@ -89,6 +90,7 @@ export default function RolePortalPage() {
 
   if (portal === 'organizer') return <main className="role-portal"><Topbar active="account"/><section className="role-wrap"><OrganizerPortalPage user={user}/></section><SiteFooter/></main>;
   if (portal === 'venue-owner') return <main className="role-portal"><Topbar active="account"/><section className="role-wrap"><VenueOwnerPortalPage user={user}/></section><SiteFooter/></main>;
+  if (portal === 'venue-staff') return <main className="role-portal"><Topbar active="account"/><section className="role-wrap"><VenueStaffPortalPage user={user}/></section><SiteFooter/></main>;
   if (['admin', 'super-admin'].includes(portal)) return <main className="role-portal"><Topbar active="account"/><section className="role-wrap"><header className="role-hero"><span><Icon/></span><div><p>ROLE WORKSPACE</p><h1>{config.title} Dashboard</h1><small>Review and manage platform activity.</small></div><Link to="/dashboard">Account Dashboard</Link></header><AdminPortalPage/></section><SiteFooter/></main>;
 
   return <main className="role-portal"><Topbar active="account"/><section className="role-wrap">

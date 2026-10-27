@@ -9,6 +9,7 @@ import { Ticket } from '../models/Ticket.js';
 import { User } from '../models/User.js';
 import { StaffAssignment } from '../models/StaffAssignment.js';
 import { VenueReservation } from '../models/VenueReservation.js';
+import { OperationalTask } from '../models/OperationalTask.js';
 import { AppError, notFound } from '../utils/errors.js';
 import { CATEGORY_NAMES, EVENT_CATEGORIES } from '../config/eventCategories.js';
 
@@ -125,6 +126,29 @@ router.post('/venue-owner/reservations/:id/confirm', authorize('venue_owner', 'a
     reservation.reviewedAt = new Date();
     reservation.reviewedBy = req.user.id;
     await reservation.save();
+
+    try {
+      const venueStaff = await User.findOne({ roles: 'venue_staff', status: 'active' });
+      if (venueStaff) {
+        const venueName = reservation.venue?.name || 'Venue';
+        const defaultTasks = [
+          { title: `Pre-event Hall & Layout Setup: ${reservation.purpose}`, notes: `Arrange floor setup, tables, chairs, and stage at ${venueName}.` },
+          { title: `A/V & Stage Lighting Readiness Check`, notes: `Verify sound systems, microphones, and backup power generator.` },
+          { title: `Catering Access & Facilities Coordination`, notes: `Open service entry, inspect kitchen water supply and waste disposal.` },
+          { title: `Guest Reception & Parking Protocol`, notes: `Coordinate gate security and parking directions for ${reservation.purpose}.` },
+        ];
+        await OperationalTask.insertMany(defaultTasks.map(t => ({
+          venue: reservation.venue?._id || reservation.venue,
+          reservation: reservation._id,
+          assignee: venueStaff._id,
+          title: t.title,
+          notes: t.notes,
+          status: 'todo',
+        })));
+      }
+    } catch (taskErr) {
+      console.error('Could not auto-generate venue staff operational tasks:', taskErr);
+    }
 
     res.json({ reservation });
   } catch (e) { next(e); }
