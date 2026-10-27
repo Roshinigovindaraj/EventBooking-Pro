@@ -10,33 +10,40 @@ const credentials = z.object({ body: z.object({ email: z.string().email().max(25
 const registration = z.object({ body: credentials.shape.body.extend({ name: z.string().trim().min(2).max(80) }) });
 const forgotPassword = z.object({ body: z.object({ email: z.string().email().max(254) }) });
 const passwordReset = z.object({ body: z.object({ token: z.string().min(32).max(256), password: z.string().min(10).max(128) }) });
-const crossSiteCookie = env.COOKIE_SECURE || env.NODE_ENV === 'production';
-const cookieOptions = { httpOnly: true, secure: crossSiteCookie, sameSite: crossSiteCookie ? 'none' : 'lax', maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86400000, path: '/api/v1/auth' };
+const crossSiteCookie = env.COOKIE_SECURE || env.NODE_ENV === 'production' || process.env.RENDER || process.env.VERCEL;
+const cookieOptions = { httpOnly: true, secure: Boolean(crossSiteCookie), sameSite: crossSiteCookie ? 'none' : 'lax', maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86400000, path: '/' };
 
 router.post('/register', validate(registration), async (req, res, next) => {
   try {
     const result = await registerCustomer(req.body);
-    res.cookie('refreshToken', result.refreshToken, cookieOptions).status(201).json({ user: result.user, accessToken: result.accessToken });
+    res.cookie('refreshToken', result.refreshToken, cookieOptions).status(201).json({ user: result.user, accessToken: result.accessToken, refreshToken: result.refreshToken });
   } catch (error) { next(error); }
 });
 
 router.post('/login', validate(credentials), async (req, res, next) => {
   try {
     const result = await login(req.body);
-    res.cookie('refreshToken', result.refreshToken, cookieOptions).json({ user: result.user, accessToken: result.accessToken });
+    res.cookie('refreshToken', result.refreshToken, cookieOptions).json({ user: result.user, accessToken: result.accessToken, refreshToken: result.refreshToken });
   } catch (error) { next(error); }
 });
 
 router.post('/refresh', async (req, res, next) => {
   try {
-    const result = await rotateRefreshToken(req.cookies.refreshToken);
-    res.cookie('refreshToken', result.refreshToken, cookieOptions).json({ user: result.user, accessToken: result.accessToken });
+    const token = req.cookies?.refreshToken || req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (!token) {
+      throw new AppError(401, 'INVALID_SESSION', 'Session is invalid or expired');
+    }
+    const result = await rotateRefreshToken(token);
+    res.cookie('refreshToken', result.refreshToken, cookieOptions).json({ user: result.user, accessToken: result.accessToken, refreshToken: result.refreshToken });
   } catch (error) { next(error); }
 });
 
 router.post('/logout', async (req, res, next) => {
   try {
-    await revokeRefreshToken(req.cookies.refreshToken);
+    const token = req.cookies?.refreshToken || req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (token) {
+      await revokeRefreshToken(token);
+    }
     res.clearCookie('refreshToken', cookieOptions).status(204).end();
   } catch (error) { next(error); }
 });

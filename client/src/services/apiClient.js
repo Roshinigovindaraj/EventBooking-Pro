@@ -13,11 +13,60 @@ const API_BASE_URL = normalizeApiBaseUrl(configuredApiUrl || (import.meta.env.DE
 export function getApiBaseUrl() {
   return API_BASE_URL;
 }
-let accessToken = null;
+const ACCESS_TOKEN_KEY = 'eventoria_access_token';
+const REFRESH_TOKEN_KEY = 'eventoria_refresh_token';
+
+let accessToken = (() => {
+  try {
+    return localStorage.getItem(ACCESS_TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+})();
 let refreshPromise = null;
 
+export function getStoredRefreshToken() {
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
 export function setAccessToken(token) {
-  accessToken = token;
+  accessToken = token || null;
+  try {
+    if (token) {
+      localStorage.setItem(ACCESS_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+    }
+  } catch {}
+}
+
+export function setRefreshToken(token) {
+  try {
+    if (token) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+  } catch {}
+}
+
+export function setTokens({ accessToken: newAccess, refreshToken: newRefresh } = {}) {
+  setAccessToken(newAccess);
+  if (newRefresh !== undefined) {
+    setRefreshToken(newRefresh);
+  }
+}
+
+export function clearTokens() {
+  accessToken = null;
+  try {
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {}
 }
 
 export async function apiRequest(path, options = {}) {
@@ -39,11 +88,20 @@ export async function apiRequest(path, options = {}) {
     // mean "wrong credentials" — we must surface that error to the user.
     const isAuthEndpoint = path.startsWith('/auth/');
     if (!isAuthEndpoint) {
-      refreshPromise ||= fetch(`${API_BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+      const storedRefresh = getStoredRefreshToken();
+      refreshPromise ||= fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(storedRefresh ? { 'x-refresh-token': storedRefresh } : {}),
+        },
+        body: JSON.stringify({ refreshToken: storedRefresh }),
+        credentials: 'include',
+      })
         .then(async refreshResponse => {
           if (!refreshResponse.ok) throw new Error('Authentication is required');
           const result = await refreshResponse.json();
-          setAccessToken(result.accessToken);
+          setTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken });
           return result;
         })
         .finally(() => { refreshPromise = null; });
@@ -51,7 +109,7 @@ export async function apiRequest(path, options = {}) {
         await refreshPromise;
         return apiRequest(path, { ...options, retryAuth: false });
       } catch {
-        setAccessToken(null);
+        clearTokens();
       }
     }
   }

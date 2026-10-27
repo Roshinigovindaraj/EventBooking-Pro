@@ -1,40 +1,97 @@
 import React from 'react';
-import { apiRequest, setAccessToken } from '../services/apiClient.js';
+import { apiRequest, setTokens, clearTokens, getStoredRefreshToken } from '../services/apiClient.js';
 
 const AuthContext = React.createContext(null);
+const USER_KEY = 'eventoria_user_profile';
+
+const getInitialUser = () => {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = React.useState(null);
+  const [user, setUser] = React.useState(getInitialUser);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    apiRequest('/auth/refresh', { method: 'POST' })
-      .then(result => { setAccessToken(result.accessToken); setUser(result.user ? { ...result.user, email: result.user.email?.toLowerCase() } : result.user); })
-      .catch(() => { setAccessToken(null); setUser(null); })
+    const storedRefresh = getStoredRefreshToken();
+    const cachedUser = getInitialUser();
+
+    if (!cachedUser && !storedRefresh) {
+      setLoading(false);
+      return;
+    }
+
+    apiRequest('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: storedRefresh }),
+    })
+      .then(result => {
+        setTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken });
+        const normalizedUser = result.user ? { ...result.user, email: result.user.email?.toLowerCase() } : result.user;
+        setUser(normalizedUser);
+        try {
+          if (normalizedUser) {
+            localStorage.setItem(USER_KEY, JSON.stringify(normalizedUser));
+          } else {
+            localStorage.removeItem(USER_KEY);
+          }
+        } catch {}
+      })
+      .catch((err) => {
+        if (err.status === 401 || err.code === 'INVALID_SESSION' || err.code === 'REFRESH_TOKEN_REQUIRED') {
+          clearTokens();
+          setUser(null);
+          try { localStorage.removeItem(USER_KEY); } catch {}
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 
   const authenticate = async (mode, values) => {
     const normalizedValues = { ...values, email: values.email?.trim().toLowerCase() };
     const result = await apiRequest(`/auth/${mode}`, { method: 'POST', body: JSON.stringify(normalizedValues) });
-    setAccessToken(result.accessToken);
+    setTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken });
     const normalizedUser = result.user ? { ...result.user, email: result.user.email?.toLowerCase() } : result.user;
     setUser(normalizedUser);
+    try {
+      if (normalizedUser) {
+        localStorage.setItem(USER_KEY, JSON.stringify(normalizedUser));
+      }
+    } catch {}
     return normalizedUser;
   };
 
   const logout = async () => {
-    await apiRequest('/auth/logout', { method: 'POST' }).catch(() => null);
-    setAccessToken(null);
+    const storedRefresh = getStoredRefreshToken();
+    await apiRequest('/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: storedRefresh }),
+    }).catch(() => null);
+    clearTokens();
     setUser(null);
+    try { localStorage.removeItem(USER_KEY); } catch {}
   };
 
   const refreshUser = async () => {
     try {
-      const result = await apiRequest('/auth/refresh', { method: 'POST' });
-      setAccessToken(result.accessToken);
+      const storedRefresh = getStoredRefreshToken();
+      const result = await apiRequest('/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken: storedRefresh }),
+      });
+      setTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken });
       const normalizedUser = result.user ? { ...result.user, email: result.user.email?.toLowerCase() } : result.user;
       setUser(normalizedUser);
+      try {
+        if (normalizedUser) {
+          localStorage.setItem(USER_KEY, JSON.stringify(normalizedUser));
+        }
+      } catch {}
       return normalizedUser;
     } catch {
       return null;

@@ -24,7 +24,7 @@ app.use(cors({
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-refresh-token'],
 }));
 app.use(express.json({ limit: '35mb' }));
 app.use(cookieParser());
