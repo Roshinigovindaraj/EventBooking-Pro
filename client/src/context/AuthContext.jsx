@@ -29,10 +29,22 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    try {
+      const result = await apiRequest('/auth/refresh', { method: 'POST' });
+      setAccessToken(result.accessToken);
+      const normalizedUser = result.user ? { ...result.user, email: result.user.email?.toLowerCase() } : result.user;
+      setUser(normalizedUser);
+      return normalizedUser;
+    } catch {
+      return null;
+    }
+  };
+
   const forgotPassword = email => apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase() }) });
   const resetPassword = values => apiRequest('/auth/reset-password', { method: 'POST', body: JSON.stringify(values) });
 
-  return <AuthContext.Provider value={{ user, loading, login: values => authenticate('login', values), register: values => authenticate('register', values), forgotPassword, resetPassword, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, loading, login: values => authenticate('login', values), register: values => authenticate('register', values), forgotPassword, resetPassword, logout, refreshUser }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

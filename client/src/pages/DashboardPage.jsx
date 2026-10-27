@@ -2,8 +2,7 @@ import React from "react";
 import { CalendarDays, Heart, Mail, MapPin, ShieldCheck, Ticket, Trash2, UserRound, Users } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import { Topbar, eventData } from "./public/CatalogPage.jsx";
-import { venueData } from "./public/VenuesPage.jsx";
+import { Topbar } from "./public/CatalogPage.jsx";
 import SiteFooter from "../components/SiteFooter.jsx";
 import { canDownloadEventTickets, downloadEventTickets } from "../utils/ticketPdf.js";
 import { apiRequest } from "../services/apiClient.js";
@@ -54,9 +53,28 @@ export default function DashboardPage() {
   const loadWishlist = React.useCallback(() => {
     if (!user) return setWishlist([]);
     const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
-    const savedEvents = eventData.filter((event) => localStorage.getItem(`eventoria:wishlist:${owner}:event:${event.id}`) === "1").map((event) => ({ ...event, kind: "event", key: `event:${event.id}` }));
-    const savedVenues = venueData.filter((venue) => localStorage.getItem(`eventoria:wishlist:${owner}:venue:${venue.name}`) === "1").map((venue) => ({ ...venue, kind: "venue", key: `venue:${venue.name}` }));
-    setWishlist([...savedEvents, ...savedVenues]);
+    const prefix = `eventoria:wishlist:${owner}:`;
+    const items = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(prefix)) continue;
+      const subKey = key.slice(prefix.length);
+      const val = localStorage.getItem(key);
+      if (!val || val === "0") continue;
+      try {
+        const parsed = JSON.parse(val);
+        if (parsed && (parsed.title || parsed.name)) {
+          items.push({
+            ...parsed,
+            kind: subKey.startsWith("venue") ? "venue" : "event",
+            key: subKey,
+          });
+        }
+      } catch {
+        // legacy flag without full payload
+      }
+    }
+    setWishlist(items);
   }, [user]);
   React.useEffect(loadWishlist, [loadWishlist]);
   React.useEffect(() => {

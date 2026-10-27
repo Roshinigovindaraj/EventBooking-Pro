@@ -26,7 +26,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '35mb' }));
 app.use(cookieParser());
 app.use('/api/v1/auth', rateLimit({ windowMs: 15 * 60_000, limit: 50, standardHeaders: 'draft-7', legacyHeaders: false }), authRoutes);
 app.get('/api/v1/health', (_req, res) => res.json({ status: 'ok', service: 'eventoria-api' }));

@@ -4,7 +4,7 @@ import QRCode from "qrcode";
 import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, CreditCard, Download, Landmark, MapPin, Minus, Plus, Share2, ShieldCheck, Smartphone, Ticket, WalletCards } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { apiRequest } from "../services/apiClient.js";
-import { Topbar, eventData } from "./public/CatalogPage.jsx";
+import { Topbar, publicEvent } from "./public/CatalogPage.jsx";
 import SiteFooter from "../components/SiteFooter.jsx";
 import { downloadEventTickets, ticketQrPayload } from "../utils/ticketPdf.js";
 
@@ -27,10 +27,11 @@ export default function BookingPage() {
   const { eventId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const event = location.state?.event || eventData.find((item) => String(item.id) === String(eventId));
+  const [event, setEvent] = React.useState(location.state?.event || null);
+  const [fetchingEvent, setFetchingEvent] = React.useState(!location.state?.event);
   const [step, setStep] = React.useState(1);
   const [quantity, setQuantity] = React.useState(1);
-  const [ticketType, setTicketType] = React.useState(event?.ticketTypes?.[0]?.name || "General Admission");
+  const [ticketType, setTicketType] = React.useState(location.state?.event?.ticketTypes?.[0]?.name || "General Admission");
   const [coupon, setCoupon] = React.useState("");
   const [couponApplied, setCouponApplied] = React.useState(false);
   const [couponError, setCouponError] = React.useState("");
@@ -39,6 +40,30 @@ export default function BookingPage() {
   const [paymentError, setPaymentError] = React.useState("");
   const [booking, setBooking] = React.useState(null);
   const [qrCodeUrl, setQrCodeUrl] = React.useState("");
+
+  React.useEffect(() => {
+    if (event || !eventId) return;
+    let active = true;
+    apiRequest(`/events/${eventId}`)
+      .then((res) => {
+        if (active && res.item) {
+          const item = {
+            ...publicEvent(res.item, 0),
+            endsAt: res.item.endsAt,
+            ticketTypes: res.item.ticketTypes || [],
+          };
+          setEvent(item);
+          if (item.ticketTypes?.[0]?.name) {
+            setTicketType(item.ticketTypes[0].name);
+          }
+        }
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (active) setFetchingEvent(false);
+      });
+    return () => { active = false; };
+  }, [eventId, event]);
 
   React.useEffect(() => {
     if (!booking) { setQrCodeUrl(""); return undefined; }
@@ -53,7 +78,7 @@ export default function BookingPage() {
     return () => { active = false; };
   }, [booking]);
 
-  if (loading) return <p className="state-message">Restoring your session…</p>;
+  if (loading || fetchingEvent) return <p className="state-message">Loading event details…</p>;
   if (!user) return <Navigate to="/auth/login" replace state={{ from: `/booking/${eventId}`, event }}/>; 
   if (!event) return <Navigate to="/discover" replace/>;
 

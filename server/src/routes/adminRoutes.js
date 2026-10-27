@@ -13,10 +13,68 @@ const router = Router();
 router.use(['/admin', '/super-admin'], authenticate, authorize('admin', 'super_admin'));
 const review = z.object({ body: z.object({ decision: z.enum(['approved', 'rejected']), feedback: z.string().max(1000).optional() }) });
 
-router.get('/admin/applications', async (req, res, next) => { try { res.json({ items: await Application.find(req.query.status ? { status: req.query.status } : {}).populate('applicant', 'name email').sort({ createdAt: 1 }) }); } catch (e) { next(e); } });
-router.post('/admin/applications/:id/review', validate(review), async (req, res, next) => { try { const application = await Application.findOne({ _id: req.params.id, status: 'pending' }); if (!application) throw notFound('Pending application not found'); application.status = req.body.decision; application.feedback = req.body.feedback; application.reviewer = req.user.id; application.reviewedAt = new Date(); await application.save(); if (application.status === 'approved') { const role = application.type === 'organizer' ? 'event_organizer' : 'venue_owner'; await User.updateOne({ _id: application.applicant }, { $addToSet: { roles: role } }); } await AuditLog.create({ actor: req.user.id, action: `application.${application.status}`, resourceType: 'Application', resourceId: application.id }); res.json({ application }); } catch (e) { next(e); } });
+router.get('/admin/applications', async (req, res, next) => { try { res.json({ items: await Application.find(req.query.status ? { status: req.query.status } : {}).populate('applicant', 'name email roles status').sort({ createdAt: 1 }) }); } catch (e) { next(e); } });
+router.post('/admin/applications/:id/review', validate(review), async (req, res, next) => {
+    try {
+        let application = await Application.findOne({ _id: req.params.id, status: 'pending' });
+        if (!application) {
+            application = await Application.findById(req.params.id);
+            if (!application) throw notFound('Pending application not found');
+            if (application.status === req.body.decision) {
+                if (application.status === 'approved') {
+                    const role = application.type === 'organizer' ? 'event_organizer' : 'venue_owner';
+                    const applicantId = application.applicant?._id || application.applicant;
+                    await User.updateOne({ _id: applicantId }, { $addToSet: { roles: role } });
+                }
+                return res.json({ application, message: `Application was already ${application.status}` });
+            }
+            throw new AppError(409, 'ALREADY_REVIEWED', `Application has already been ${application.status}`);
+        }
+        application.status = req.body.decision;
+        application.feedback = req.body.feedback;
+        application.reviewer = req.user.id;
+        application.reviewedAt = new Date();
+        await application.save();
+        if (application.status === 'approved') {
+            const role = application.type === 'organizer' ? 'event_organizer' : 'venue_owner';
+            const applicantId = application.applicant?._id || application.applicant;
+            await User.updateOne({ _id: applicantId }, { $addToSet: { roles: role } });
+        }
+        await AuditLog.create({ actor: req.user.id, action: `application.${application.status}`, resourceType: 'Application', resourceId: application.id });
+        res.json({ application });
+    } catch (e) { next(e); }
+});
 
-for (const [path, Model] of [['events', Event], ['venues', Venue]]) router.post(`/admin/${path}/:id/review`, validate(review), async (req, res, next) => { try { const item = await Model.findOne({ _id: req.params.id, status: 'pending_review' }); if (!item) throw notFound('Pending listing not found'); item.status = req.body.decision === 'approved' ? 'published' : 'rejected'; item.approvalFeedback = req.body.feedback; if (item.status === 'published' && path === 'events') item.publishedAt = new Date(); await item.save(); await AuditLog.create({ actor: req.user.id, action: `${path}.${item.status}`, resourceType: Model.modelName, resourceId: item.id }); res.json({ item }); } catch (e) { next(e); } });
+for (const [path, Model] of [['events', Event], ['venues', Venue]]) {
+    router.post(`/admin/${path}/:id/review`, validate(review), async (req, res, next) => {
+        try {
+            let item = await Model.findOne({ _id: req.params.id, status: 'pending_review' });
+            if (!item) {
+                item = await Model.findById(req.params.id);
+                if (!item) throw notFound(`Pending ${path.replace(/s$/, '')} not found`);
+                const targetStatus = req.body.decision === 'approved' ? 'published' : 'rejected';
+                if (item.status === targetStatus || item.status === 'published') {
+                    if (path === 'venues' && item.owner && req.body.decision === 'approved') {
+                        await User.updateOne({ _id: item.owner }, { $addToSet: { roles: 'venue_owner' } });
+                    }
+                    return res.json({ item, message: `Listing is already ${item.status}` });
+                }
+            }
+            item.status = req.body.decision === 'approved' ? 'published' : 'rejected';
+            item.approvalFeedback = req.body.feedback;
+            if (item.status === 'published') {
+                if (path === 'events') {
+                    item.publishedAt = new Date();
+                } else if (path === 'venues' && item.owner) {
+                    await User.updateOne({ _id: item.owner }, { $addToSet: { roles: 'venue_owner' } });
+                }
+            }
+            await item.save();
+            await AuditLog.create({ actor: req.user.id, action: `${path}.${item.status}`, resourceType: Model.modelName, resourceId: item.id });
+            res.json({ item });
+        } catch (e) { next(e); }
+    });
+}
 
 router.get('/admin/users', async (req, res, next) => { try { const filter = req.query.q ? { $or: [{ name: new RegExp(String(req.query.q), 'i') }, { email: new RegExp(String(req.query.q), 'i') }] } : {}; res.json({ items: await User.find(filter).limit(100).sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 router.patch('/admin/users/:id/status', validate(z.object({ body: z.object({ status: z.enum(['active', 'suspended']) }) })), async (req, res, next) => { try { if (String(req.user.id) === req.params.id && req.body.status === 'suspended') throw new AppError(409, 'SELF_SUSPEND', 'You cannot suspend your own account'); const user = await User.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true }); if (!user) throw notFound('User not found'); await AuditLog.create({ actor: req.user.id, action: `user.${req.body.status}`, resourceType: 'User', resourceId: user.id }); res.json({ user }); } catch (e) { next(e); } });

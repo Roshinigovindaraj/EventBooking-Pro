@@ -23,80 +23,21 @@ import { Topbar } from "./CatalogPage.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
 import { apiRequest } from "../../services/apiClient.js";
 
-const venueImages = [
-  "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=900&q=85",
-  "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=900&q=85",
-  "https://images.unsplash.com/photo-1564501049412-61c2a3083791?auto=format&fit=crop&w=900&q=85",
-  "https://images.unsplash.com/photo-1507501336603-6e31db2be093?auto=format&fit=crop&w=900&q=85",
-  "https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=900&q=85",
-  "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=85",
-];
+const venueData = [];
+export { venueData };
 
-const venues = [
-  [
-    "The Grand Palace",
-    "Banquet Halls",
-    "Salem",
-    "500 - 1,000",
-    25000,
-    "4.8",
-    "320",
-  ],
-  [
-    "Skyline Convention",
-    "Convention Centers",
-    "Salem",
-    "200 - 800",
-    40000,
-    "4.6",
-    "210",
-  ],
-  [
-    "Royal Orchid Resort",
-    "Resorts",
-    "Yercaud",
-    "100 - 500",
-    60000,
-    "4.7",
-    "188",
-  ],
-  [
-    "The Lotus Banquet",
-    "Banquet Halls",
-    "Salem",
-    "300 - 700",
-    35000,
-    "4.5",
-    "178",
-  ],
-  ["Green Valley Lawns", "Lawns", "Salem", "500 - 1,500", 30000, "4.4", "132"],
-  [
-    "Heritage Hills Resort",
-    "Resorts",
-    "Yercaud",
-    "50 - 300",
-    45000,
-    "4.6",
-    "165",
-  ],
-].map((item, index) => ({
-  name: item[0],
-  type: item[1],
-  city: item[2],
-  guests: item[3],
-  capacity: Number(
-    item[3]
-      .split("-")
-      .pop()
-      .replace(/[^0-9]/g, ""),
-  ),
-  price: item[4],
-  rating: item[5],
-  reviews: item[6],
-  image: venueImages[index],
-}));
-export { venues as venueData };
-const publicVenue = (venue, index) => ({ name: venue.name, id: venue._id, type: venue.type, city: venue.location?.city || "", guests: `Up to ${Number(venue.capacity).toLocaleString("en-IN")}`, capacity: venue.capacity, price: Math.round(venue.priceMinorPerHour / 100), rating: "New", reviews: "0", image: venue.images?.[0] || venueImages[index % venueImages.length] });
+export const publicVenue = (venue) => ({
+  name: venue.name,
+  id: venue._id,
+  type: venue.type,
+  city: venue.location?.city || venue.city || "",
+  guests: `Up to ${Number(venue.capacity || 0).toLocaleString("en-IN")}`,
+  capacity: venue.capacity || 0,
+  price: Math.round((venue.priceMinorPerHour || 0) / 100),
+  rating: "New",
+  reviews: "0",
+  image: venue.images?.[0] || "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=900&q=85",
+});
 
 const types = [
   "All Venues",
@@ -112,10 +53,15 @@ const types = [
 function VenueCard({ venue, onView }) {
   const { user } = useAuth();
   const owner = encodeURIComponent(user?._id || user?.id || user?.email?.toLowerCase() || "guest");
-  const storageKey = `eventoria:wishlist:${owner}:venue:${venue.name}`;
-  const [liked, setLiked] = React.useState(() => localStorage.getItem(storageKey) === "1");
-  React.useEffect(() => setLiked(localStorage.getItem(storageKey) === "1"), [storageKey]);
-  const toggleLiked = () => setLiked((current) => { const next = !current; localStorage.setItem(storageKey, next ? "1" : "0"); return next; });
+  const storageKey = `eventoria:wishlist:${owner}:venue:${venue.id || venue.name}`;
+  const [liked, setLiked] = React.useState(() => Boolean(localStorage.getItem(storageKey)));
+  React.useEffect(() => setLiked(Boolean(localStorage.getItem(storageKey))), [storageKey]);
+  const toggleLiked = () => setLiked((current) => {
+    const next = !current;
+    if (next) localStorage.setItem(storageKey, JSON.stringify(venue));
+    else localStorage.removeItem(storageKey);
+    return next;
+  });
   return (
     <article className="vn-card">
       <div className="vn-photo">
@@ -161,8 +107,32 @@ export default function VenuesPage() {
   const [page, setPage] = React.useState(1);
   const [selectedVenue, setSelectedVenue] = React.useState(null);
   const [guestNotice, setGuestNotice] = React.useState("");
-  const [catalogVenues, setCatalogVenues] = React.useState(venues);
-  React.useEffect(() => { let active = true; const load = () => apiRequest('/venues').then((result) => { if (active && result.items?.length) setCatalogVenues(result.items.map(publicVenue)); }).catch(() => null); load(); window.addEventListener('eventoria:data-changed', load); window.addEventListener('focus', load); return () => { active = false; window.removeEventListener('eventoria:data-changed', load); window.removeEventListener('focus', load); }; }, []);
+  const [catalogVenues, setCatalogVenues] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    let active = true;
+    const load = () => {
+      setLoading(true);
+      return apiRequest('/venues')
+        .then((result) => {
+          if (active) setCatalogVenues((result.items || []).map(publicVenue));
+        })
+        .catch(() => {
+          if (active) setCatalogVenues([]);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    };
+    load();
+    window.addEventListener('eventoria:data-changed', load);
+    window.addEventListener('focus', load);
+    return () => {
+      active = false;
+      window.removeEventListener('eventoria:data-changed', load);
+      window.removeEventListener('focus', load);
+    };
+  }, []);
   const filtered = catalogVenues.filter(
     (v) =>
       (!query ||
@@ -360,17 +330,27 @@ export default function VenuesPage() {
           </button>
         </aside>
         <section className="vn-results">
-          <h2>{filtered.length || 0} Venues Found</h2>
-          <div className="vn-grid">
-            {shown.map((v) => (
-              <VenueCard venue={v} onView={setSelectedVenue} key={v.name} />
-            ))}
-          </div>
-          {!filtered.length && (
-            <div className="vn-empty">
-              No venues match your search.{" "}
-              <button onClick={clear}>Clear filters</button>
-            </div>
+          <h2>{loading ? "Searching venues…" : `${filtered.length || 0} Venues Found`}</h2>
+          {loading ? (
+            <p className="state-message">Loading verified venues…</p>
+          ) : (
+            <>
+              <div className="vn-grid">
+                {shown.map((v) => (
+                  <VenueCard venue={v} onView={setSelectedVenue} key={v.id || v.name} />
+                ))}
+              </div>
+              {!filtered.length && (
+                <div className="vn-empty">
+                  <h3>No venues found</h3>
+                  <p>Only venues added by verified venue owners appear here. Once approved, they will be listed automatically.</p>
+                  <div style={{ marginTop: "16px", display: "flex", gap: "12px", justifyContent: "center" }}>
+                    <a href="/list-venue" className="btn primary">List Your Venue</a>
+                    <button type="button" onClick={clear} className="btn ghost">Clear filters</button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
           {filtered.length > 0 && (
             <div className="vn-pages">
@@ -442,11 +422,17 @@ export default function VenuesPage() {
             View All Venues <ArrowRight />
           </a>
         </header>
-        <div>
-          {venues.slice(0, 4).map((v) => (
-            <VenueCard venue={v} onView={setSelectedVenue} key={v.name} />
-          ))}
-        </div>
+        {catalogVenues.length > 0 ? (
+          <div>
+            {catalogVenues.slice(0, 4).map((v) => (
+              <VenueCard venue={v} onView={setSelectedVenue} key={v.id || v.name} />
+            ))}
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", padding: "32px 20px", color: "#667085" }}>
+            <p>No featured venues available yet. Spaces added by verified venue owners will appear here.</p>
+          </div>
+        )}
       </section>
       {selectedVenue && (
         <div

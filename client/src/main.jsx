@@ -4,16 +4,17 @@ import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate } from 're
 import { Search, MapPin, CalendarDays, Heart, ArrowRight, ChevronLeft, ChevronRight, ShieldCheck, Headphones, Tag, Sparkles, Mail, Menu, X, Star, Ticket, Building2, Smartphone, Music2, PartyPopper, Gem, BriefcaseBusiness, Trophy, TentTree, Mic2, Store, Play, Users, Gift, House } from 'lucide-react';
 import { AuthProvider } from './context/AuthContext.jsx';
 import AuthPage from './pages/auth/AuthPage.jsx';
-import CatalogPage, { Topbar, eventData } from './pages/public/CatalogPage.jsx';
+import CatalogPage, { Topbar, publicEvent } from './pages/public/CatalogPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import SiteFooter from './components/SiteFooter.jsx';
-import VenuesPage, { venueData } from './pages/public/VenuesPage.jsx';
+import VenuesPage, { publicVenue } from './pages/public/VenuesPage.jsx';
 import OrganizePage from './pages/public/OrganizePage.jsx';
 import ListVenuePage from './pages/public/ListVenuePage.jsx';
 import BookingPage from './pages/BookingPage.jsx';
 import RolePortalPage from './pages/RolePortalPage.jsx';
 import TicketScannerPage from './pages/TicketScannerPage.jsx';
 import { eventCategories } from './data/eventCategories.js';
+import { apiRequest } from './services/apiClient.js';
 import './styles.css';
 
 const img = {
@@ -43,9 +44,6 @@ const heroCopy = [
 
 const categories = eventCategories.map(({name,image})=>[name,image]);
 
-const featuredEvents = eventData.slice(0, 4);
-const featuredVenues = venueData.slice(0, 4);
-
 function Logo({light=false}) { return <a className={`logo ${light?'light':''}`} href="#"><span className="logo-mark">✦</span><span><b>Eventoria</b><small>Events • Venues • Every Moment</small></span></a> }
 
 function Header(){
@@ -70,20 +68,75 @@ function Categories(){return <section className="categories wrap" aria-label="Ev
 
 function CategoryDirectory(){const navigate=useNavigate();return <section className="category-directory wrap" aria-labelledby="category-directory-title"><div className="category-directory-heading"><p className="eyebrow">EXPLORE YOUR INTERESTS</p><h2 id="category-directory-title">Browse Events by Category</h2><p>Search by event name, category, location, organizer, or venue.</p></div><div className="category-groups">{eventCategories.map(group=><article key={group.name}><div className="category-group-title"><img src={group.image} alt=""/><h3>{group.name}</h3></div><div className="subcategory-list">{group.subcategories.map(item=><button key={item} onClick={()=>navigate(`/discover?type=events&category=${encodeURIComponent(group.name)}&subcategory=${encodeURIComponent(item)}`)}>{item}</button>)}</div></article>)}</div><button className="category-example" onClick={()=>navigate('/discover?type=events&q=Music%20events%20in%20Salem')}><Search/> Try: “Music events in Salem” <ArrowRight/></button></section>}
 
-function SectionTitle({kicker,title,accent,desc}){return <div className="section-heading"><div><p className="eyebrow">{kicker}</p><h2>{title} <em>{accent}</em></h2>{desc&&<p>{desc}</p>}</div><a href="#">View All {kicker.includes('VENUE')?'Venues':'Events'} <ArrowRight/></a></div>}
+function SectionTitle({kicker,title,accent,desc}){return <div className="section-heading"><div><p className="eyebrow">{kicker}</p><h2>{title} <em>{accent}</em></h2>{desc&&<p>{desc}</p>}</div><a href={kicker.includes('VENUE')?'/venues':'/discover'}>View All {kicker.includes('VENUE')?'Venues':'Events'} <ArrowRight/></a></div>}
 function CarouselButtons(){return <div className="carousel-buttons"><button aria-label="Previous"><ChevronLeft/></button><button aria-label="Next"><ChevronRight/></button></div>}
 
 function EventCard({e}){const navigate=useNavigate();const book=()=>navigate(`/booking/${e.id}`,{state:{event:e}});return <article className="card"><div className="card-image"><img src={e.image} alt={e.title}/><button className="heart" aria-label={`Save ${e.title}`}><Heart/></button><div className="date"><b>{e.day}</b><span>{e.month}</span></div></div><div className="card-body"><span className={`pill ${e.type.toLowerCase()}`}>{e.type}</span><h3>{e.title}</h3><p><MapPin/> {e.city}</p><p><Store/> {e.venue}</p><div className="price">From <b>{e.price}</b><button onClick={book} aria-label={`Book ${e.title}`}><ArrowRight/></button></div></div></article>}
 function VenueCard({v}){const navigate=useNavigate();return <article className="card"><div className="card-image venue"><img src={v.image} alt={v.name}/><button className="heart" aria-label={`Save ${v.name}`}><Heart/></button></div><div className="card-body"><h3>{v.name}</h3><div className="rating"><Star fill="#ff9e34"/> {v.rating} <small>({v.reviews} reviews)</small></div><p><Store/> {v.type} <span>•</span> {v.city}</p><p><ShieldCheck/> {v.guests} Guests</p><div className="price">From <b>₹{v.price.toLocaleString('en-IN')}/day</b><button onClick={()=>navigate('/venues')} aria-label={`View ${v.name}`}><ArrowRight/></button></div></div></article>}
 
-function Listings(){return <main className="discovery"><section className="listing wrap" id="events"><SectionTitle kicker="FEATURED EVENTS" title="Trending" accent="Events" desc="Happening Near You"/><div className="title-sub">Explore the most exciting events and book your tickets before they’re gone!</div><CarouselButtons/><div className="cards">{featuredEvents.map(e=><EventCard e={e} key={e.id}/>)}</div></section><section className="listing wrap" id="venues"><SectionTitle kicker="POPULAR VENUES" title="Extraordinary" accent="Venues" desc="for Your Special Occasions"/><div className="title-sub">From luxury banquet halls to outdoor spaces, find the perfect venue for weddings, parties, corporate events and more.</div><CarouselButtons/><div className="cards">{featuredVenues.map(v=><VenueCard v={v} key={v.name}/>)}</div></section></main>}
+function Listings(){
+  const [events, setEvents] = React.useState([]);
+  const [venues, setVenues] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let active = true;
+    Promise.all([
+      apiRequest('/events?limit=4').catch(() => ({ items: [] })),
+      apiRequest('/venues').catch(() => ({ items: [] })),
+    ]).then(([eventRes, venueRes]) => {
+      if (!active) return;
+      const loadedEvents = (eventRes.items || []).map((e, index) => publicEvent(e, index));
+      const loadedVenues = (venueRes.items || []).map(publicVenue);
+      setEvents(loadedEvents.slice(0, 4));
+      setVenues(loadedVenues.slice(0, 4));
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+
+  return (
+    <main className="discovery">
+      <section className="listing wrap" id="events">
+        <SectionTitle kicker="FEATURED EVENTS" title="Trending" accent="Events" desc="Happening Near You"/>
+        <div className="title-sub">Explore the most exciting events and book your tickets before they’re gone!</div>
+        {events.length > 0 && <CarouselButtons/>}
+        {loading ? (
+          <p className="state-message">Loading verified events…</p>
+        ) : events.length > 0 ? (
+          <div className="cards">{events.map(e => <EventCard e={e} key={e.id}/>)}</div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '48px 24px', background: '#fff', borderRadius: '18px', border: '1px dashed #e8dbe2' }}>
+            <p style={{ margin: '0 0 16px', color: '#556075', fontSize: '15px' }}>No events published yet. Events added by organizers will be featured here.</p>
+            <Link to="/organize#become-organizer" className="btn primary">Become an Organizer <ArrowRight/></Link>
+          </div>
+        )}
+      </section>
+      <section className="listing wrap" id="venues">
+        <SectionTitle kicker="POPULAR VENUES" title="Extraordinary" accent="Venues" desc="for Your Special Occasions"/>
+        <div className="title-sub">From luxury banquet halls to outdoor spaces, find the perfect venue for weddings, parties, corporate events and more.</div>
+        {venues.length > 0 && <CarouselButtons/>}
+        {loading ? (
+          <p className="state-message">Loading verified venues…</p>
+        ) : venues.length > 0 ? (
+          <div className="cards">{venues.map(v => <VenueCard v={v} key={v.id || v.name}/>)}</div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '48px 24px', background: '#fff', borderRadius: '18px', border: '1px dashed #e8dbe2' }}>
+            <p style={{ margin: '0 0 16px', color: '#556075', fontSize: '15px' }}>No venues listed yet. Spaces added by verified venue owners will be featured here.</p>
+            <Link to="/list-venue" className="btn primary">List Your Venue <ArrowRight/></Link>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
 
 const benefits=[['Wide Variety','Thousands of events and venues',Sparkles],['Best Prices','Exclusive deals and offers',Tag],['Secure Booking','Safe & reliable payments',ShieldCheck],['24/7 Support','Always here to help you',Headphones]];
 function Why(){return <section className="why"><div className="wrap why-grid"><div className="why-copy"><p className="eyebrow">WHY EVENTORIA?</p><h2>More Than Just Events & Venues</h2><p>A complete platform for event discovery, venue booking, and seamless event management.</p><div className="benefits">{benefits.map(([a,b,I])=><div key={a}><i><I/></i><b>{a}</b><span>{b}</span></div>)}</div></div><div className="why-image" style={{backgroundImage:`url(${img.why})`}}><p>Good<br/>Celebrations<br/><em>Never end!</em></p></div></div></section>}
 
 function Wedding(){return <section className="wedding wrap"><div className="wedding-copy"><p className="eyebrow">WEDDING SPECIAL</p><h2>Your Dream<br/><em>Wedding Starts Here</em></h2><p>Beautiful venues, trusted vendors and everything you need to make your big day perfect.</p><button className="btn wedding-btn">Explore Wedding Venues <ArrowRight/></button><div className="wedding-features"><span><Building2/><b>Stunning Venues</b></span><span><Users/><b>Trusted Vendors</b></span><span><Gift/><b>Customized Packages</b></span></div></div><div className="wedding-visual" style={{backgroundImage:`url(${img.wedding})`}}/></section>}
 
-function Phone({second=false}){return <div className={`phone ${second?'second':''}`}><div className="notch"/><div className="phone-logo"><Logo/></div><div className="phone-search"><Search/> Search events...</div><div className="phone-cats"><span>🎵</span><span>💍</span><span>🎉</span><span>⚽</span></div><img src={second?img.venue3:img.event1} alt="Eventoria app preview"/><b>{second?'Royal Orchids Resort':'Arijit Singh Live'}</b><small>{second?'Goa • Resort':'Chennai • Concert'}</small></div>}
+function Phone({second=false}){return <div className={`phone ${second?'second':''}`}><div className="notch"/><div className="phone-logo"><Logo/></div><div className="phone-search"><Search/> Search events...</div><div className="phone-cats"><span>🎵</span><span>💍</span><span>🎉</span><span>⚽</span></div><img src={second?img.venue3:img.event1} alt="Eventoria app preview"/><b>{second?'Verified Venues':'Live Experiences'}</b><small>{second?'Resorts • Banquet • Halls':'Concerts • Sports • Meets'}</small></div>}
 function AppPromo(){const points=[[Sparkles,'Discover Events','Near You'],[CalendarDays,'Book Venues','For Any Occasion'],[Ticket,'Manage Bookings','Easily'],[Smartphone,'Digital Tickets','With QR Code'],[MapPin,'Exclusive Offers','& Discounts']]; return <section className="app-promo"><div className="wrap app-grid"><div><p className="eyebrow">ON THE GO</p><h2>Events & Venues<br/><em>in Your Pocket</em></h2><p>Download our app and get instant access to the best events, venues and exclusive offers.</p><div className="stores"><button> <span><small>Download on the</small>App Store</span></button><button>▶ <span><small>GET IT ON</small>Google Play</span></button></div></div><div className="phones"><Phone/><Phone second/></div><div className="app-points">{points.map(([I,a,b])=><div key={a}><i><I/></i><span><b>{a}</b><small>{b}</small></span></div>)}</div></div></section>}
 
 const testimonials=[['Priya','“Amazing platform! Found the perfect venue for my wedding. The booking process was so easy.”','/images/testimonial-priya.png'],['Rajesh Kumar','“Booked concert tickets in minutes. Great experience and excellent support!”','/images/testimonial-rahul.png'],['Sneha','“The best place to find unique events and venues. Highly recommended!”','/images/testimonial-sneha.png']];

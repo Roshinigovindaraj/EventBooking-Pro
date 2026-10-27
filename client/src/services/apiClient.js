@@ -34,19 +34,25 @@ export async function apiRequest(path, options = {}) {
     throw new Error(`Cannot reach the API at ${API_BASE_URL}. Check VITE_API_BASE_URL and the API CORS settings.`, { cause });
   }
   if (response.status === 401 && path !== '/auth/refresh' && options.retryAuth !== false) {
-    refreshPromise ||= fetch(`${API_BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
-      .then(async refreshResponse => {
-        if (!refreshResponse.ok) throw new Error('Authentication is required');
-        const result = await refreshResponse.json();
-        setAccessToken(result.accessToken);
-        return result;
-      })
-      .finally(() => { refreshPromise = null; });
-    try {
-      await refreshPromise;
-      return apiRequest(path, { ...options, retryAuth: false });
-    } catch {
-      setAccessToken(null);
+    // Only attempt a silent token refresh for routes that require authentication
+    // (i.e. NOT the login/register endpoints). Auth endpoints that return 401
+    // mean "wrong credentials" — we must surface that error to the user.
+    const isAuthEndpoint = path.startsWith('/auth/');
+    if (!isAuthEndpoint) {
+      refreshPromise ||= fetch(`${API_BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+        .then(async refreshResponse => {
+          if (!refreshResponse.ok) throw new Error('Authentication is required');
+          const result = await refreshResponse.json();
+          setAccessToken(result.accessToken);
+          return result;
+        })
+        .finally(() => { refreshPromise = null; });
+      try {
+        await refreshPromise;
+        return apiRequest(path, { ...options, retryAuth: false });
+      } catch {
+        setAccessToken(null);
+      }
     }
   }
   if (response.status === 204) return null;

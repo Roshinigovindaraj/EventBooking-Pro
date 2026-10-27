@@ -44,192 +44,37 @@ const categories = [
   ["Workshops", Ticket],
   ["Exhibitions", Store],
 ];
-const events = [
-  {
-    image: "/images/concert.png",
-    day: "15",
-    month: "NOV",
-    title: "Arijit Singh Live in Concert",
-    artist: "Arijit Singh",
-    type: "Concerts",
-    venue: "Salem Indoor Stadium",
-    time: "7:00 PM - 10:00 PM",
-    price: "₹ 1,499",
-  },
-  {
-    image: "/images/party.png",
-    day: "22",
-    month: "NOV",
-    title: "Stand Up Comedy Night",
-    artist: "Karthik Kumar",
-    type: "Parties",
-    venue: "Kalyani Auditorium",
-    time: "7:00 PM - 9:30 PM",
-    price: "₹ 499",
-  },
-  {
-    image: "/images/business.png",
-    day: "10",
-    month: "DEC",
-    title: "Tech Innovation Summit 2026",
-    artist: "Future Tech Forum",
-    type: "Business Events",
-    venue: "Salem Convention Centre",
-    time: "9:00 AM - 5:00 PM",
-    price: "₹ 1,499",
-  },
-  {
-    image: "/images/festival.png",
-    day: "18",
-    month: "JAN",
-    title: "Food & Culture Festival",
-    type: "Festivals",
-    venue: "Salem Fair Grounds",
-    time: "11:00 AM - 10:00 PM",
-    price: "₹ 299",
-  },
-  {
-    image: "/images/sports.png",
-    day: "05",
-    month: "FEB",
-    title: "State Level Cricket Championship",
-    type: "Sports",
-    venue: "Salem District Stadium",
-    time: "9:00 AM - 6:00 PM",
-    price: "₹ 299",
-  },
-  {
-    image: "/images/workshop.png",
-    day: "28",
-    month: "FEB",
-    title: "Photography Workshop",
-    type: "Workshops",
-    venue: "Creativity Hub, Salem",
-    time: "10:00 AM - 4:00 PM",
-    price: "₹ 1,199",
-  },
-  {
-    image: "/images/expo.png",
-    day: "12",
-    month: "JAN",
-    title: "Art & Handicraft Exhibition",
-    type: "Exhibitions",
-    venue: "Salem Exhibition Centre",
-    time: "10:00 AM - 8:00 PM",
-    price: "₹ 149",
-  },
-  {
-    image: "/images/hero4.png",
-    day: "25",
-    month: "JAN",
-    title: "EDM Night – DJ Festival",
-    artist: "DJ Chetas",
-    type: "Parties",
-    venue: "Urban Arena, Salem",
-    time: "7:00 PM - 12:00 PM",
-    price: "₹ 799",
-  },
-  {
-    image: "/images/hero1.png",
-    day: "14",
-    month: "MAR",
-    title: "Sunset Music Festival",
-    artist: "The Local Train",
-    type: "Concerts",
-    venue: "Salem Open Grounds",
-    time: "4:00 PM - 11:00 PM",
-    price: "₹ 999",
-  },
-  {
-    image: "/images/why-events.png",
-    day: "03",
-    month: "APR",
-    title: "Business Networking Meet",
-    type: "Business Events",
-    venue: "Grand Estancia Hotel",
-    time: "4:00 PM - 8:00 PM",
-    price: "₹ 999",
-  },
-  {
-    image: "/images/hero6.png",
-    day: "18",
-    month: "APR",
-    title: "Cultural Dance Festival",
-    type: "Festivals",
-    venue: "Salem Arts Arena",
-    time: "6:00 PM - 10:00 PM",
-    price: "₹ 399",
-  },
-  {
-    image: "/images/hero3.png",
-    day: "30",
-    month: "APR",
-    title: "AI & Technology Workshop",
-    type: "Workshops",
-    venue: "Salem Tech Hub",
-    time: "10:00 AM - 4:00 PM",
-    price: "₹ 799",
-  },
-];
-const eventData = events.map((event, index) => ({
-  ...event,
-  id: index + 1,
-  city: [
-    "Salem",
-    "Chennai",
-    "Bengaluru",
-    "Salem",
-    "Coimbatore",
-    "Chennai",
-    "Salem",
-    "Bengaluru",
-    "Coimbatore",
-    "Salem",
-    "Chennai",
-    "Bengaluru",
-  ][index],
-  priceValue: Number(event.price.replace(/[^0-9]/g, "")),
-  startsAt: [
-    "2026-11-15T19:00:00+05:30",
-    "2026-11-22T19:00:00+05:30",
-    "2026-12-10T09:00:00+05:30",
-    "2027-01-18T11:00:00+05:30",
-    "2027-02-05T09:00:00+05:30",
-    "2027-02-28T10:00:00+05:30",
-    "2027-01-12T10:00:00+05:30",
-    "2027-01-25T19:00:00+05:30",
-    "2027-03-14T16:00:00+05:30",
-    "2027-04-03T16:00:00+05:30",
-    "2027-04-18T18:00:00+05:30",
-    "2027-04-30T10:00:00+05:30",
-  ][index],
-  mode: [
-    "In-Person Events",
-    "In-Person Events",
-    "Hybrid Events",
-    "In-Person Events",
-    "In-Person Events",
-    "Online Events",
-    "In-Person Events",
-    "In-Person Events",
-    "In-Person Events",
-    "Hybrid Events",
-    "In-Person Events",
-    "Online Events",
-  ][index],
-  availability: index === 7 || index === 10 ? "Sold Out" : "Available Tickets",
-  recommendation: [98, 91, 96, 89, 94, 86, 82, 93, 90, 88, 84, 87][index],
-}));
+
+const eventData = [];
 export { eventData };
 
-const publicEvent = (event, index) => {
+export const publicEvent = (event, index = 0) => {
   const start = new Date(event.startsAt);
   const end = new Date(event.endsAt);
   const prices = (event.ticketTypes || []).map((ticket) => ticket.priceMinor / 100);
   const capacity = (event.ticketTypes || []).reduce((sum, ticket) => sum + ticket.capacity, 0);
-  const used = (event.ticketTypes || []).reduce((sum, ticket) => sum + ticket.sold + ticket.reserved, 0);
-  const formatTime = (date) => date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
-  return { id: event._id, image: event.images?.[0] || eventData[index % eventData.length].image, day: String(start.getDate()).padStart(2, "0"), month: start.toLocaleString("en-IN", { month: "short" }).toUpperCase(), title: event.title, type: event.subcategory || event.category, venue: event.venueName || "Venue to be announced", time: `${formatTime(start)} - ${formatTime(end)}`, price: `₹ ${(prices.length ? Math.min(...prices) : 0).toLocaleString("en-IN")}`, city: event.location?.city || "", priceValue: prices.length ? Math.min(...prices) : 0, startsAt: event.startsAt, mode: "In-Person Events", availability: capacity > 0 && used >= capacity ? "Sold Out" : "Available Tickets", recommendation: 100 - index };
+  const used = (event.ticketTypes || []).reduce((sum, ticket) => sum + (ticket.sold || 0) + (ticket.reserved || 0), 0);
+  const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.valueOf());
+  const formatTime = (date) => isValidDate(date) ? date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "";
+
+  return {
+    id: event._id || event.id,
+    image: event.images?.[0] || "/images/hero1.png",
+    day: isValidDate(start) ? String(start.getDate()).padStart(2, "0") : "01",
+    month: isValidDate(start) ? start.toLocaleString("en-IN", { month: "short" }).toUpperCase() : "EVENT",
+    title: event.title || "Untitled Event",
+    artist: event.organizer?.name || "",
+    type: event.subcategory || event.category || "Events",
+    venue: event.venueName || event.location?.address || "Venue to be announced",
+    time: isValidDate(start) ? `${formatTime(start)} - ${formatTime(end)}` : "Time to be announced",
+    price: `₹ ${(prices.length ? Math.min(...prices) : 0).toLocaleString("en-IN")}`,
+    city: event.location?.city || "",
+    priceValue: prices.length ? Math.min(...prices) : 0,
+    startsAt: event.startsAt,
+    mode: "In-Person Events",
+    availability: capacity > 0 && used >= capacity ? "Sold Out" : "Available Tickets",
+    recommendation: 100 - index,
+  };
 };
 
 const startOfDay = (value) => {
@@ -409,9 +254,14 @@ function EventCard({ event, index, onView }) {
   const { user } = useAuth();
   const owner = encodeURIComponent(user?._id || user?.id || user?.email?.toLowerCase() || "guest");
   const storageKey = `eventoria:wishlist:${owner}:event:${event.id}`;
-  const [liked, setLiked] = React.useState(() => localStorage.getItem(storageKey) === "1");
-  React.useEffect(() => setLiked(localStorage.getItem(storageKey) === "1"), [storageKey]);
-  const toggleLiked = () => setLiked((current) => { const next = !current; localStorage.setItem(storageKey, next ? "1" : "0"); return next; });
+  const [liked, setLiked] = React.useState(() => Boolean(localStorage.getItem(storageKey)));
+  React.useEffect(() => setLiked(Boolean(localStorage.getItem(storageKey))), [storageKey]);
+  const toggleLiked = () => setLiked((current) => {
+    const next = !current;
+    if (next) localStorage.setItem(storageKey, JSON.stringify(event));
+    else localStorage.removeItem(storageKey);
+    return next;
+  });
   return (
     <article className="evx-card">
       <div className="evx-card-photo">
@@ -450,7 +300,8 @@ function EventCard({ event, index, onView }) {
   );
 }
 export default function CatalogPage() {
-  const [catalogEvents, setCatalogEvents] = React.useState(eventData);
+  const [catalogEvents, setCatalogEvents] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
   const navigate = useNavigate();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -486,9 +337,33 @@ export default function CatalogPage() {
   const [guestNotice, setGuestNotice] = React.useState("");
   React.useEffect(() => {
     let active = true;
-    const load = () => apiRequest('/events?limit=50').then((result) => { if (active && result.items?.length) setCatalogEvents(result.items.map((item, index) => ({ ...publicEvent(item, index), endsAt: item.endsAt, ticketTypes: item.ticketTypes || [] }))); }).catch(() => null);
-    load(); window.addEventListener('eventoria:data-changed', load); window.addEventListener('focus', load);
-    return () => { active = false; window.removeEventListener('eventoria:data-changed', load); window.removeEventListener('focus', load); };
+    const load = () => {
+      setLoading(true);
+      return apiRequest('/events?limit=50')
+        .then((result) => {
+          if (active) {
+            setCatalogEvents((result.items || []).map((item, index) => ({
+              ...publicEvent(item, index),
+              endsAt: item.endsAt,
+              ticketTypes: item.ticketTypes || [],
+            })));
+          }
+        })
+        .catch(() => {
+          if (active) setCatalogEvents([]);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    };
+    load();
+    window.addEventListener('eventoria:data-changed', load);
+    window.addEventListener('focus', load);
+    return () => {
+      active = false;
+      window.removeEventListener('eventoria:data-changed', load);
+      window.removeEventListener('focus', load);
+    };
   }, []);
   const [calendarMonth, setCalendarMonth] = React.useState(() => {
     const date = new Date();
@@ -860,18 +735,28 @@ export default function CatalogPage() {
         <Filters selected={selected} toggle={toggle} clear={clear} />
         <section className="evx-results" id="events">
           <div className="evx-results-head">
-            <b>{sorted.length} Events Found</b>
+            <b>{loading ? "Searching events…" : `${sorted.length} Events Found`}</b>
           </div>
-          <div className="evx-grid">
-            {shown.map((event, index) => (
-              <EventCard event={event} index={index} onView={setSelectedEvent} key={event.id} />
-            ))}
-          </div>
-          {!shown.length && (
-            <div className="evx-empty">
-              No events match your filters.{" "}
-              <button onClick={clear}>Clear all filters</button>
-            </div>
+          {loading ? (
+            <p className="state-message">Loading verified events…</p>
+          ) : (
+            <>
+              <div className="evx-grid">
+                {shown.map((event, index) => (
+                  <EventCard event={event} index={index} onView={setSelectedEvent} key={event.id} />
+                ))}
+              </div>
+              {!shown.length && (
+                <div className="evx-empty">
+                  <h3>No events found</h3>
+                  <p>Only events created by approved organizers are displayed. Events will appear here once published.</p>
+                  <div style={{ marginTop: "16px", display: "flex", gap: "12px", justifyContent: "center" }}>
+                    <Link to="/organize#become-organizer" className="btn primary">Become an Organizer</Link>
+                    <button type="button" onClick={clear} className="btn ghost">Clear filters</button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
           {sorted.length > 0 && (
             <div className="evx-pagination">
