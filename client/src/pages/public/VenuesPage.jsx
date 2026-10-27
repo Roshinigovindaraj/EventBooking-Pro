@@ -190,21 +190,117 @@ export default function VenuesPage() {
   });
   const [bookingState, setBookingState] = React.useState({ busy: false, error: "", success: null });
 
-  const parseScheduleDateTime = (dateStr, timeStr, period = "AM") => {
+  const formatLocalDate = (d = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const parseScheduleDateTime = (dateStr, timeStr, explicitPeriod = "AM") => {
     if (!dateStr || !timeStr) return null;
-    const clean = String(timeStr).trim().replace(".", ":");
-    let [hStr, mStr] = clean.split(":");
+
+    // 1. Parse date (supports YYYY-MM-DD or DD-MM-YYYY)
+    const dateParts = String(dateStr).trim().split(/[-/.]/).map(Number);
+    if (dateParts.length !== 3 || dateParts.some(isNaN)) return null;
+
+    let y, m, d;
+    if (dateParts[0] > 1000) {
+      [y, m, d] = dateParts;
+    } else if (dateParts[2] > 1000) {
+      [d, m, y] = dateParts;
+    } else {
+      [y, m, d] = dateParts;
+    }
+    if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
+
+    // 2. Parse time string
+    const raw = String(timeStr).trim().toLowerCase();
+    let period = (explicitPeriod || "AM").toUpperCase();
+
+    // Check if user typed AM or PM in the input box
+    if (/pm/i.test(raw)) {
+      period = "PM";
+    } else if (/am/i.test(raw)) {
+      period = "AM";
+    }
+
+    // Extract hours and minutes
+    const clean = raw.replace(/[apm\s]/gi, "").replace(".", ":");
+    const [hStr, mStr] = clean.split(":");
     let hours = parseInt(hStr, 10);
-    let minutes = mStr !== undefined ? parseInt(mStr, 10) : 0;
-    if (isNaN(hours) || hours < 1 || hours > 12) return null;
-    if (isNaN(minutes) || minutes < 0 || minutes > 59) return null;
+    let minutes = mStr !== undefined && mStr !== "" ? parseInt(mStr, 10) : 0;
 
-    if (period === "PM" && hours < 12) hours += 12;
-    if (period === "AM" && hours === 12) hours = 0;
+    if (isNaN(hours) || isNaN(minutes) || minutes < 0 || minutes > 59) return null;
 
-    const [y, m, d] = dateStr.split("-").map(Number);
+    // Support 24-hour inputs (e.g. 13 to 23, or 0)
+    if (hours >= 13 && hours <= 23) {
+      // 24-hour notation implies PM (e.g. 18:00 = 6 PM)
+    } else if (hours === 0) {
+      // Midnight (00:00)
+    } else if (hours >= 1 && hours <= 12) {
+      if (period === "PM" && hours < 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+    } else {
+      return null;
+    }
+
     const dt = new Date(y, m - 1, d, hours, minutes, 0, 0);
     return isNaN(dt.valueOf()) ? null : dt;
+  };
+
+  const handleTimeChange = (timeKey, periodKey, val) => {
+    let detectedPeriod = null;
+    if (/pm/i.test(val)) detectedPeriod = "PM";
+    else if (/am/i.test(val)) detectedPeriod = "AM";
+
+    setBookingSchedule(prev => ({
+      ...prev,
+      [timeKey]: val,
+      ...(detectedPeriod ? { [periodKey]: detectedPeriod } : {}),
+    }));
+  };
+
+  const handleTimeBlur = (timeKey, periodKey) => {
+    setBookingSchedule(prev => {
+      const raw = String(prev[timeKey] || "").trim();
+      if (!raw) return prev;
+      let period = prev[periodKey];
+      if (/pm/i.test(raw)) period = "PM";
+      else if (/am/i.test(raw)) period = "AM";
+
+      const clean = raw.replace(/[apm\s]/gi, "").replace(".", ":");
+      const [hStr, mStr] = clean.split(":");
+      let h = parseInt(hStr, 10);
+      let m = mStr !== undefined && mStr !== "" ? parseInt(mStr, 10) : 0;
+      if (isNaN(h)) return prev;
+      if (isNaN(m) || m < 0 || m > 59) m = 0;
+
+      if (h >= 13 && h <= 23) {
+        h -= 12;
+        period = "PM";
+      } else if (h === 0) {
+        h = 12;
+        period = "AM";
+      }
+
+      const formattedTime = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      return {
+        ...prev,
+        [timeKey]: formattedTime,
+        [periodKey]: period,
+      };
+    });
+  };
+
+  const handleStartDateChange = (val) => {
+    setBookingSchedule(s => {
+      const next = { ...s, startDate: val };
+      if (!s.endDate || s.endDate < val) {
+        next.endDate = val;
+      }
+      return next;
+    });
   };
 
   const bookVenue = (venue) => {
@@ -214,7 +310,7 @@ export default function VenuesPage() {
     }
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+    const tomorrowStr = formatLocalDate(tomorrow);
 
     setBookingVenue(venue);
     setBookingSchedule({
@@ -572,7 +668,7 @@ export default function VenuesPage() {
           aria-label={`Book ${bookingVenue.name}`}
           onClick={(e) => { if (e.target === e.currentTarget && !bookingState.busy) setBookingVenue(null); }}
         >
-          <article style={{ maxWidth: 580, width: "94%", maxHeight: "90vh", overflowY: "auto" }}>
+          <article style={{ maxWidth: 640, width: "min(640px, 96%)", maxHeight: "90vh", overflowY: "auto" }}>
             <button
               className="vn-modal-close"
               onClick={() => { setBookingVenue(null); setBookingState({ busy: false, error: "", success: null }); }}
@@ -655,44 +751,46 @@ export default function VenuesPage() {
                       placeholder="e.g. Wedding Reception, Corporate Meeting, Birthday Celebration"
                       value={bookingForm.purpose}
                       onChange={(e) => setBookingForm(f => ({ ...f, purpose: e.target.value }))}
-                      style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #d0d5dd", fontSize: 14 }}
+                      style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #d0d5dd", fontSize: 14, boxSizing: "border-box" }}
                     />
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
                     {/* START DATE & TIME */}
-                    <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0" }}>
-                      <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>
+                    <div style={{ background: "#f8fafc", padding: "14px 16px", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+                      <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>
                         Start Date & Time <em>*</em>
                       </label>
-                      <div style={{ marginBottom: 8 }}>
-                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 3 }}>DATE</span>
+                      <div style={{ marginBottom: 10 }}>
+                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700, letterSpacing: "0.03em", display: "block", marginBottom: 4 }}>DATE</span>
                         <input
                           type="date"
                           required
-                          min={new Date().toISOString().split("T")[0]}
+                          min={formatLocalDate(new Date())}
                           value={bookingSchedule.startDate}
-                          onChange={(e) => setBookingSchedule(s => ({ ...s, startDate: e.target.value }))}
-                          style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13, background: "#fff" }}
+                          onChange={(e) => handleStartDateChange(e.target.value)}
+                          style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #cbd5e1", fontSize: 13, background: "#fff", boxSizing: "border-box" }}
                         />
                       </div>
                       <div>
-                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 3 }}>TIME (Type time + select AM/PM)</span>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700, letterSpacing: "0.03em", display: "block", marginBottom: 4 }}>TIME & PERIOD</span>
+                        <div style={{ display: "flex", gap: 8, alignItems: "stretch", width: "100%" }}>
                           <input
                             type="text"
                             required
-                            placeholder="e.g. 10:00"
+                            placeholder="10:00"
                             value={bookingSchedule.startTime}
-                            onChange={(e) => setBookingSchedule(s => ({ ...s, startTime: e.target.value }))}
-                            style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13, background: "#fff", fontWeight: 700, color: "#0f172a" }}
+                            onChange={(e) => handleTimeChange("startTime", "startPeriod", e.target.value)}
+                            onBlur={() => handleTimeBlur("startTime", "startPeriod")}
+                            style={{ flex: "1 1 0%", minWidth: 0, padding: "9px 12px", borderRadius: 8, border: "1.5px solid #cbd5e1", fontSize: 13, background: "#fff", fontWeight: 700, color: "#0f172a", boxSizing: "border-box" }}
                           />
-                          <div style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1.5px solid #2563eb", background: "#f8fafc" }}>
+                          <div style={{ display: "inline-flex", flexShrink: 0, borderRadius: 8, overflow: "hidden", border: "1.5px solid #2563eb", background: "#f8fafc" }}>
                             <button
                               type="button"
                               onClick={() => setBookingSchedule(s => ({ ...s, startPeriod: "AM" }))}
                               style={{
-                                padding: "7px 13px",
+                                padding: "8px 14px",
+                                minWidth: 44,
                                 fontSize: 12,
                                 fontWeight: 800,
                                 border: "none",
@@ -708,7 +806,8 @@ export default function VenuesPage() {
                               type="button"
                               onClick={() => setBookingSchedule(s => ({ ...s, startPeriod: "PM" }))}
                               style={{
-                                padding: "7px 13px",
+                                padding: "8px 14px",
+                                minWidth: 44,
                                 fontSize: 12,
                                 fontWeight: 800,
                                 border: "none",
@@ -727,38 +826,40 @@ export default function VenuesPage() {
                     </div>
 
                     {/* END DATE & TIME */}
-                    <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0" }}>
-                      <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>
+                    <div style={{ background: "#f8fafc", padding: "14px 16px", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+                      <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>
                         End Date & Time <em>*</em>
                       </label>
-                      <div style={{ marginBottom: 8 }}>
-                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 3 }}>DATE</span>
+                      <div style={{ marginBottom: 10 }}>
+                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700, letterSpacing: "0.03em", display: "block", marginBottom: 4 }}>DATE</span>
                         <input
                           type="date"
                           required
-                          min={bookingSchedule.startDate || new Date().toISOString().split("T")[0]}
+                          min={bookingSchedule.startDate || formatLocalDate(new Date())}
                           value={bookingSchedule.endDate}
                           onChange={(e) => setBookingSchedule(s => ({ ...s, endDate: e.target.value }))}
-                          style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13, background: "#fff" }}
+                          style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #cbd5e1", fontSize: 13, background: "#fff", boxSizing: "border-box" }}
                         />
                       </div>
                       <div>
-                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 3 }}>TIME (Type time + select AM/PM)</span>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700, letterSpacing: "0.03em", display: "block", marginBottom: 4 }}>TIME & PERIOD</span>
+                        <div style={{ display: "flex", gap: 8, alignItems: "stretch", width: "100%" }}>
                           <input
                             type="text"
                             required
-                            placeholder="e.g. 06:00"
+                            placeholder="06:00"
                             value={bookingSchedule.endTime}
-                            onChange={(e) => setBookingSchedule(s => ({ ...s, endTime: e.target.value }))}
-                            style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13, background: "#fff", fontWeight: 700, color: "#0f172a" }}
+                            onChange={(e) => handleTimeChange("endTime", "endPeriod", e.target.value)}
+                            onBlur={() => handleTimeBlur("endTime", "endPeriod")}
+                            style={{ flex: "1 1 0%", minWidth: 0, padding: "9px 12px", borderRadius: 8, border: "1.5px solid #cbd5e1", fontSize: 13, background: "#fff", fontWeight: 700, color: "#0f172a", boxSizing: "border-box" }}
                           />
-                          <div style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1.5px solid #2563eb", background: "#f8fafc" }}>
+                          <div style={{ display: "inline-flex", flexShrink: 0, borderRadius: 8, overflow: "hidden", border: "1.5px solid #2563eb", background: "#f8fafc" }}>
                             <button
                               type="button"
                               onClick={() => setBookingSchedule(s => ({ ...s, endPeriod: "AM" }))}
                               style={{
-                                padding: "7px 13px",
+                                padding: "8px 14px",
+                                minWidth: 44,
                                 fontSize: 12,
                                 fontWeight: 800,
                                 border: "none",
@@ -774,7 +875,8 @@ export default function VenuesPage() {
                               type="button"
                               onClick={() => setBookingSchedule(s => ({ ...s, endPeriod: "PM" }))}
                               style={{
-                                padding: "7px 13px",
+                                padding: "8px 14px",
+                                minWidth: 44,
                                 fontSize: 12,
                                 fontWeight: 800,
                                 border: "none",
@@ -802,34 +904,58 @@ export default function VenuesPage() {
                       placeholder="e.g. Estimated 250 guests, need outside catering access and sound system."
                       value={bookingForm.customerNotes}
                       onChange={(e) => setBookingForm(f => ({ ...f, customerNotes: e.target.value }))}
-                      style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #d0d5dd", fontSize: 13, resize: "vertical", fontFamily: "inherit" }}
+                      style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #d0d5dd", fontSize: 13, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
                     />
                   </div>
 
                   {(() => {
                     const start = parseScheduleDateTime(bookingSchedule.startDate, bookingSchedule.startTime, bookingSchedule.startPeriod);
                     const end = parseScheduleDateTime(bookingSchedule.endDate, bookingSchedule.endTime, bookingSchedule.endPeriod);
-                    const validRange = start && end && end > start;
-                    const hours = validRange ? Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60))) : 0;
+                    const now = new Date();
+                    const isStartFuture = start && start > now;
+                    const isEndAfterStart = start && end && end > start;
+                    const validRange = Boolean(start && end && isEndAfterStart && isStartFuture);
+                    const hours = start && end && end > start ? Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60))) : 0;
                     const totalCost = validRange ? hours * bookingVenue.price : 0;
+
+                    let statusMessage = "Enter valid future dates & times";
+                    if (!start || !end) {
+                      statusMessage = "Enter valid dates & times (e.g. 10:00 AM)";
+                    } else if (!isStartFuture) {
+                      statusMessage = "Start date & time must be in the future";
+                    } else if (!isEndAfterStart) {
+                      statusMessage = "End date & time must be after start time";
+                    }
+
                     return (
                       <div style={{ background: "#f9fafb", borderRadius: 10, padding: "14px 16px", border: "1px solid #eaecf0", marginTop: 2 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#475467", marginBottom: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#475467", marginBottom: 6 }}>
                           <span>Duration</span>
-                          <b>{validRange ? `${hours} hours` : <span style={{ color: "#b54708" }}>Enter valid future dates & times</span>}</b>
+                          <b>
+                            {validRange ? (
+                              <span style={{ color: "#097948", fontWeight: 700 }}>{hours} hour{hours > 1 ? "s" : ""}</span>
+                            ) : (
+                              <span style={{ color: "#b54708", fontSize: 12, fontWeight: 600 }}>{statusMessage}</span>
+                            )}
+                          </b>
                         </div>
-                        {validRange && (
+                        {start && end && isEndAfterStart && (
                           <div style={{ fontSize: 12, color: "#097948", marginBottom: 6, fontWeight: 600 }}>
-                            {start.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}, {bookingSchedule.startTime} {bookingSchedule.startPeriod} → {end.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}, {bookingSchedule.endTime} {bookingSchedule.endPeriod}
+                            {start.toLocaleDateString("en-IN", { month: "short", day: "numeric" })},{" "}
+                            {start.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })} →{" "}
+                            {end.toLocaleDateString("en-IN", { month: "short", day: "numeric" })},{" "}
+                            {end.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })}
                           </div>
                         )}
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#475467", marginBottom: 8 }}>
                           <span>Hourly Rate</span>
                           <b>₹{bookingVenue.price.toLocaleString("en-IN")}/hr</b>
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, color: "#101828", borderTop: "1px solid #e4e7ec", paddingTop: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 15, fontWeight: 700, color: "#101828", borderTop: "1px solid #e4e7ec", paddingTop: 8 }}>
                           <span>Estimated Total</span>
-                          <span style={{ color: "#d61858" }}>₹{totalCost.toLocaleString("en-IN")}</span>
+                          <span style={{ color: "#d61858", fontSize: 18, fontWeight: 800 }}>
+                            ₹{totalCost.toLocaleString("en-IN")}
+                          </span>
                         </div>
                       </div>
                     );
