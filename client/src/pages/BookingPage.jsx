@@ -144,7 +144,24 @@ export default function BookingPage() {
       checkout.open();
     } catch (error) { setPaymentError(error.message); setProcessing(false); }
   };
-  const downloadTicket = () => downloadEventTickets(booking);
+  const [downloading, setDownloading] = React.useState(false);
+  const [downloadStatus, setDownloadStatus] = React.useState("");
+
+  const downloadTicket = async () => {
+    if (!booking) return;
+    setDownloading(true);
+    setDownloadStatus("");
+    try {
+      await downloadEventTickets(booking);
+      setDownloadStatus("✓ Ticket PDF downloaded successfully! Check your downloads.");
+      setTimeout(() => setDownloadStatus(""), 5000);
+    } catch (error) {
+      setDownloadStatus(`Download failed: ${error.message || "Please try again."}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const shareTicket = async () => {
     const text = `${booking.customerName} · ${booking.title} · ${booking.date} · Booking ${booking.id}`;
     if (navigator.share) await navigator.share({ title: "Eventoria E-Ticket", text }).catch(() => null);
@@ -169,7 +186,27 @@ export default function BookingPage() {
         <div className="ticket-event"><img src={booking.image} alt=""/><div><b>{booking.title}</b><small>{booking.date} · {booking.time}</small><small>{booking.venue}, {booking.city}</small></div></div>
         <div className="ticket-qr">{qrCodeUrl ? <img src={qrCodeUrl} alt={`QR code for ticket ${booking.id}-P01`}/> : <span>Generating QR code…</span>}</div>
         <dl><div><dt>Booking ID</dt><dd>{booking.id}</dd></div><div><dt>Name</dt><dd>{booking.customerName || user.name}</dd></div><div><dt>Ticket Type</dt><dd>{booking.ticketType}</dd></div><div><dt>Quantity</dt><dd>{booking.quantity}</dd></div><div><dt>Seat / Entry</dt><dd>{booking.ticketType === "General Admission" ? "GA - Standing" : booking.ticketType}</dd></div><div><dt>Total Paid</dt><dd>{booking.price}</dd></div></dl>
-        <footer><button onClick={downloadTicket}><Download/> Download</button><button onClick={shareTicket}><Share2/> Share</button></footer>
+        <footer>
+          <button disabled={downloading} onClick={downloadTicket} style={{ minWidth: 120 }}>
+            <Download size={16} /> {downloading ? "Preparing PDF…" : "Download"}
+          </button>
+          <button onClick={shareTicket}><Share2 size={16}/> Share</button>
+        </footer>
+        {downloadStatus && (
+          <div style={{
+            margin: "12px 18px 0",
+            padding: "8px 12px",
+            borderRadius: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            textAlign: "center",
+            color: downloadStatus.startsWith("✓") ? "#047857" : "#b91c1c",
+            background: downloadStatus.startsWith("✓") ? "#ecfdf5" : "#fef2f2",
+            border: `1px solid ${downloadStatus.startsWith("✓") ? "#a7f3d0" : "#fecaca"}`
+          }}>
+            {downloadStatus}
+          </div>
+        )}
       </article>
       <div className="success-actions"><button className="booking-primary" onClick={() => navigate("/dashboard")}>View My Bookings <ArrowRight/></button></div>
     </section>}

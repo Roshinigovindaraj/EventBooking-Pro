@@ -1,19 +1,32 @@
 import QRCode from "qrcode";
 import { getApiBaseUrl } from "../services/apiClient.js";
 
-export const canDownloadEventTickets = (booking) =>
-  Boolean(booking) && ["confirmed", "rescheduled"].includes(String(booking.status || "").trim().toLowerCase());
+export const canDownloadEventTickets = (booking) => {
+  if (!booking) return false;
+  const status = String(booking.rawStatus || booking.status || "").trim().toLowerCase();
+  if (["cancelled", "canceled", "refunded", "rejected", "declined by venue owner", "expired"].some((bad) => status.includes(bad))) {
+    return false;
+  }
+  if (status.includes("pending") && !status.includes("confirm")) {
+    return false;
+  }
+  return status.includes("confirm") || status.includes("reschedule") || status.includes("paid") || status.includes("success");
+};
 
 export const ticketQrPayload = (booking, attendeeNumber = 1) => {
-  const ticketId = `${booking.id}-P${String(attendeeNumber).padStart(2, "0")}`;
+  const ticketId = `${booking.id || "EVT"}-P${String(attendeeNumber).padStart(2, "0")}`;
   const issuedTicket = booking.tickets?.[attendeeNumber - 1];
   if (!issuedTicket?.credential) {
     return JSON.stringify({ type: "eventoria-ticket", ticketId, eventId: booking.eventId, credential: null });
   }
-  const apiBaseUrl = getApiBaseUrl();
-  if (!apiBaseUrl) throw new Error("API is not configured. Set VITE_API_BASE_URL before generating tickets.");
-  const absoluteApiBaseUrl = new URL(apiBaseUrl, window.location.origin).href.replace(/\/$/, "");
-  return `${absoluteApiBaseUrl}/public/tickets/lookup?credential=${encodeURIComponent(issuedTicket.credential)}`;
+  try {
+    const apiBaseUrl = getApiBaseUrl();
+    const origin = typeof window !== "undefined" && window.location?.origin ? window.location.origin : "http://localhost:5173";
+    const absoluteApiBaseUrl = apiBaseUrl ? new URL(apiBaseUrl, origin).href.replace(/\/$/, "") : origin;
+    return `${absoluteApiBaseUrl}/public/tickets/lookup?credential=${encodeURIComponent(issuedTicket.credential)}`;
+  } catch {
+    return JSON.stringify({ type: "eventoria-ticket", ticketId, eventId: booking.eventId, credential: issuedTicket.credential });
+  }
 };
 
 const drawTicketBase = (pdf) => {
@@ -64,25 +77,32 @@ export async function downloadEventTickets(booking) {
   const quantity = Number(booking.quantity) || 1;
   const ticketType = booking.ticketType || "General Admission";
   const customerName = String(booking.customerName || booking.userName || "Ticket Holder").trim();
+  const eventTitle = String(booking.title || booking.venue || "Eventoria Experience").trim();
+  const venueText = String(booking.venue || booking.city || "Venue").trim();
+  const cityText = String(booking.city || "").trim();
+  const venueLine = cityText && !venueText.includes(cityText) ? `${venueText}, ${cityText}` : venueText;
+  const timeLine = String(booking.time || "Scheduled Time").trim();
+  const dateLine = String(booking.date || "Scheduled Date").trim();
+  const isVenue = Boolean(booking.isVenueReservation);
 
   for (let attendee = 1; attendee <= quantity; attendee += 1) {
     if (attendee > 1) pdf.addPage([210, 90], "landscape");
-    const ticketId = `${booking.id}-P${String(attendee).padStart(2, "0")}`;
+    const ticketId = `${booking.id || "EVT"}-P${String(attendee).padStart(2, "0")}`;
     const qr = await QRCode.toDataURL(ticketQrPayload(booking, attendee), { errorCorrectionLevel: "M", margin: 4, width: 800 });
 
     drawTicketBase(pdf);
 
     pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(8);
-    pdf.text("EVENTORIA  /  LIVE EXPERIENCE", 16, 18);
+    pdf.text(isVenue ? "EVENTORIA  /  VENUE RESERVATION" : "EVENTORIA  /  LIVE EXPERIENCE", 16, 18);
     pdf.setFontSize(21);
-    const titleLines = pdf.splitTextToSize(booking.title.toUpperCase(), 105);
+    const titleLines = pdf.splitTextToSize(eventTitle.toUpperCase(), 105);
     pdf.text(titleLines, 16, 36);
     const infoY = Math.min(59, 38 + titleLines.length * 8);
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5);
-    pdf.text(`${booking.date}  /  ${booking.time}`, 16, infoY);
-    pdf.text(`${booking.venue}, ${booking.city}`, 16, infoY + 6);
+    pdf.text(`${dateLine}  /  ${timeLine}`, 16, infoY);
+    pdf.text(venueLine, 16, infoY + 6);
     pdf.setFontSize(6.5); pdf.setTextColor(218, 205, 234);
-    pdf.text(`BOOKING ${booking.id}   |   ORDER TOTAL ${paid}`, 16, 76);
+    pdf.text(`BOOKING ${booking.id || "REFERENCE"}   |   ORDER TOTAL ${paid}`, 16, 76);
 
     pdf.setFillColor(255, 250, 253); pdf.rect(145, 7, 58, 76, "F");
     pdf.setDrawColor(92, 46, 122); pdf.setLineDashPattern([1.2, 1.5], 0); pdf.line(145, 10, 145, 80); pdf.setLineDashPattern([], 0);
@@ -112,7 +132,7 @@ export async function downloadEventTickets(booking) {
     pdf.setFillColor(0, 190, 199); pdf.circle(126, 10, 10, "F");
     pdf.setFillColor(255, 60, 119); pdf.circle(197, 77, 16, "F");
     pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(17);
-    pdf.text(booking.title.toUpperCase(), 18, 29, { maxWidth: 170 });
+    pdf.text(eventTitle.toUpperCase(), 18, 29, { maxWidth: 170 });
     pdf.setFontSize(8); pdf.text("EVENT GUIDELINES", 18, 37);
     pdf.setDrawColor(190, 166, 211); pdf.setLineWidth(.25); pdf.line(51, 35.5, 139, 35.5); pdf.line(103, 42, 103, 72);
 
@@ -125,10 +145,32 @@ export async function downloadEventTickets(booking) {
     });
     pdf.setDrawColor(216, 199, 229); pdf.line(159, 65, 184, 65);
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.setTextColor(222, 207, 234); pdf.text("BOOKING REFERENCE", 160, 71);
-    pdf.setFont("helvetica", "bold"); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255); pdf.text(booking.id, 160, 77);
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255); pdf.text(booking.id || "REFERENCE", 160, 77);
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.setTextColor(222, 207, 234); pdf.text("TICKET HOLDER", 160, 52);
     pdf.setFont("helvetica", "bold"); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255); pdf.text(pdf.splitTextToSize(customerName, 34)[0], 160, 58);
   }
 
-  pdf.save(`${booking.id}-Eventoria-tickets.pdf`);
+  const filename = `${booking.id || 'EVT-TICKET'}-Eventoria-tickets.pdf`;
+  if (typeof document !== "undefined" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+    try {
+      const blob = pdf.output("blob");
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        try { document.body.removeChild(link); } catch {}
+        URL.revokeObjectURL(blobUrl);
+      }, 2000);
+      return { success: true, filename };
+    } catch {
+      // fallback to pdf.save
+    }
+  }
+
+  pdf.save(filename);
+  return { success: true, filename };
 }

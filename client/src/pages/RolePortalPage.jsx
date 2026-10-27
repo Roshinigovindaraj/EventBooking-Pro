@@ -7,6 +7,7 @@ import { Topbar } from './public/CatalogPage.jsx';
 import SiteFooter from '../components/SiteFooter.jsx';
 import OrganizerPortalPage from './OrganizerPortalPage.jsx';
 import AdminPortalPage from './AdminPortalPage.jsx';
+import VenueOwnerPortalPage from './VenueOwnerPortalPage.jsx';
 
 const portals = {
   organizer: { role: 'event_organizer', title: 'Event Organizer', icon: CalendarDays, endpoints: [['Events', '/organizer/events'], ['Bookings & Attendees', '/organizer/bookings']], modules: ['Create & manage events', 'Tickets, pricing & offers', 'Bookings & attendees', 'Check-in & attendance', 'Reports & analytics'] },
@@ -87,6 +88,7 @@ export default function RolePortalPage() {
   };
 
   if (portal === 'organizer') return <main className="role-portal"><Topbar active="account"/><section className="role-wrap"><OrganizerPortalPage user={user}/></section><SiteFooter/></main>;
+  if (portal === 'venue-owner') return <main className="role-portal"><Topbar active="account"/><section className="role-wrap"><VenueOwnerPortalPage user={user}/></section><SiteFooter/></main>;
   if (['admin', 'super-admin'].includes(portal)) return <main className="role-portal"><Topbar active="account"/><section className="role-wrap"><header className="role-hero"><span><Icon/></span><div><p>ROLE WORKSPACE</p><h1>{config.title} Dashboard</h1><small>Review and manage platform activity.</small></div><Link to="/dashboard">Account Dashboard</Link></header><AdminPortalPage/></section><SiteFooter/></main>;
 
   return <main className="role-portal"><Topbar active="account"/><section className="role-wrap">
@@ -95,7 +97,7 @@ export default function RolePortalPage() {
     <section className="role-module-grid">{config.modules.map((module, index) => <article key={module}><i>{React.createElement([Users, CalendarDays, Ticket, Activity, BarChart3, ShieldCheck][index % 6])}</i><b>{module}</b><small>{index < sections.length ? `${sections[index].items.length} current records` : 'HLD module access'}</small></article>)}</section>
     {error && <p className="role-error" role="alert">{error}</p>}
     {['admin', 'super-admin'].includes(portal) && <section className="role-approvals">{sections.flatMap((section) => section.items.filter((item) => ['pending', 'pending_review'].includes(item.status)).map((item) => ({ section, item }))).map(({ section, item }) => <article key={`review-${item._id}`}><span><strong>{itemTitle(item)}</strong><small>{section.label} · {String(item.status).replaceAll('_', ' ')}</small></span>{['Events', 'Venues', 'Applications'].includes(section.label) && <span className="role-review"><button onClick={() => reviewItem(section, item, 'approved')}>Approve</button><button onClick={() => reviewItem(section, item, 'rejected')}>Reject</button></span>}</article>)}</section>}
-    {busy ? <p className="state-message">Loading role modules…</p> : <section className="role-data-grid">{sections.map((section) => <article key={section.label}><header><h2>{section.label}</h2><b>{section.items.length}</b></header>{section.items.length ? <div>{section.items.slice(0, 12).map((item) => <p key={item._id || item.id}><span><strong>{itemTitle(item)}</strong><small>{String(itemMeta(item)).replaceAll('_', ' ')}</small></span><CheckCircle2/></p>)}</div> : <small>No records assigned yet.</small>}</article>)}</section>}
+    {busy ? <p className="state-message">Loading role modules…</p> : <section className="role-data-grid">{sections.map((section) => <article key={section.label}><header><h2>{section.label}</h2><b>{section.items.length}</b></header>{section.items.length ? <div>{section.items.slice(0, 12).map((item) => <p key={item._id || item.id}><span><strong>{itemTitle(item)}</strong><small>{String(itemMeta(item)).replaceAll('_', ' ')}</small></span><CheckCircle2/></p>)}</div> : <div><small>No records assigned yet.</small>{portal === 'event-staff' && <div style={{ marginTop: '12px', padding: '12px 14px', background: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe', fontSize: '12px', color: '#1e40af' }}><b>💡 How events are assigned:</b><p style={{ margin: '4px 0 0', lineHeight: 1.5, color: '#2563eb' }}>Event Organizers assign staff to their events from the <strong>Organizer Workspace &gt; Event Staff &amp; Check-in</strong> tab. Once an organizer assigns your account (<code>{user.name}</code>), your event and ticket scanner will activate here automatically.</p></div>}</div>}</article>)}</section>}
   </section><SiteFooter/></main>;
 }
 

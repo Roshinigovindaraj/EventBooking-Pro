@@ -36,14 +36,31 @@ export async function createEventBooking({ customerId, eventId, ticketTypeId, qu
   } finally { await session.endSession(); }
 }
 
-export async function createVenueReservation({ customerId, venueId, startsAt, endsAt, purpose }) {
+export async function createVenueReservation({ customerId, venueId, startsAt, endsAt, purpose, customerNotes = '' }) {
   const start = new Date(startsAt); const end = new Date(endsAt);
   if (start <= new Date() || end <= start) throw new AppError(422, 'INVALID_TIME_RANGE', 'Reservation must be for a valid future time range');
   const venue = await Venue.findOne({ _id: venueId, status: 'published' });
   if (!venue) throw new AppError(404, 'VENUE_NOT_FOUND', 'Bookable venue not found');
-  const conflict = await VenueReservation.exists({ venue: venue.id, status: { $in: ['pending_payment', 'pending_approval', 'confirmed'] }, reservationExpiresAt: { $gt: new Date() }, startsAt: { $lt: end }, endsAt: { $gt: start } });
-  if (conflict) throw new AppError(409, 'VENUE_UNAVAILABLE', 'The venue is unavailable for that time range');
+  const conflict = await VenueReservation.exists({
+    venue: venue.id,
+    status: 'confirmed',
+    startsAt: { $lt: end },
+    endsAt: { $gt: start },
+  });
+  if (conflict) throw new AppError(409, 'VENUE_UNAVAILABLE', 'The venue is already booked and confirmed for that time range');
   const hours = Math.ceil((end - start) / 3_600_000);
-  return VenueReservation.create({ customer: customerId, venue: venue.id, startsAt: start, endsAt: end, purpose, totalMinor: hours * venue.priceMinorPerHour, currency: venue.currency, reservationExpiresAt: new Date(Date.now() + 15 * 60_000), reference: reference('VEN') });
+  return VenueReservation.create({
+    customer: customerId,
+    venue: venue.id,
+    startsAt: start,
+    endsAt: end,
+    purpose,
+    customerNotes: customerNotes ? customerNotes.trim() : '',
+    totalMinor: hours * venue.priceMinorPerHour,
+    currency: venue.currency,
+    status: 'pending_approval',
+    reservationExpiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+    reference: reference('VEN'),
+  });
 }
 

@@ -15,6 +15,15 @@ for (const [path, type] of [['organizer', 'organizer'], ['venue-owner', 'venue_o
       res.status(201).json({ application: await Application.create({ applicant: req.user.id, type, details: req.body.details }) });
     } catch (e) { next(e); }
   });
+  router.put(`/${path}/applications/pending`, validate(schema), async (req, res, next) => {
+    try {
+      const application = await Application.findOne({ applicant: req.user.id, type, status: 'pending' });
+      if (!application) throw new AppError(404, 'NOT_FOUND', 'No pending application found to update');
+      application.details = { ...(application.details || {}), ...req.body.details };
+      await application.save();
+      res.json({ application });
+    } catch (e) { next(e); }
+  });
   router.get(`/${path}/applications/me`, async (req, res, next) => { try { res.json({ items: await Application.find({ applicant: req.user.id, type }).sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 }
 export default router;

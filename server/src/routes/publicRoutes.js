@@ -8,14 +8,16 @@ import { Event } from '../models/Event.js';
 import { User } from '../models/User.js';
 import { AppError, notFound } from '../utils/errors.js';
 
+import { resolveTicket } from '../utils/ticketResolver.js';
+
 const router = Router();
 
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 
-router.get('/tickets/lookup', validate(z.object({ query: z.object({ credential: z.string().min(32).max(200) }) })), async (req, res, next) => {
+router.get('/tickets/lookup', validate(z.object({ query: z.object({ credential: z.string().trim().min(1).max(500) }) })), async (req, res, next) => {
   try {
-    const credentialHash = hash(req.query.credential);
-    const ticket = await Ticket.findOne({ credentialHash }).select('+credentialHash');
+    const resolved = await resolveTicket(req.query.credential);
+    const ticket = resolved?.ticket;
     
     if (!ticket) {
       throw notFound('Ticket not found or invalid');

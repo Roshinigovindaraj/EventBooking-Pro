@@ -33,6 +33,33 @@ const normalizeBackendBooking = (booking, customerName) => {
   };
 };
 
+const normalizeVenueReservation = (res, customerName) => {
+  const venue = res.venue || {};
+  const startsAt = res.startsAt ? new Date(res.startsAt) : null;
+  const endsAt = res.endsAt ? new Date(res.endsAt) : null;
+  return {
+    id: res.reference || res._id,
+    backendId: res._id,
+    venueId: venue._id,
+    customerName,
+    title: venue.name || "Venue Reservation",
+    image: venue.images?.[0] || "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=700&q=80",
+    date: startsAt && !Number.isNaN(startsAt.valueOf()) ? startsAt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Date unavailable",
+    time: startsAt && !Number.isNaN(startsAt.valueOf()) ? `${startsAt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })} - ${endsAt && !Number.isNaN(endsAt.valueOf()) ? endsAt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ''}` : "Time unavailable",
+    venue: venue.name || "Venue",
+    city: venue.location?.city || venue.city || "",
+    price: new Intl.NumberFormat("en-IN", { style: "currency", currency: res.currency || "INR" }).format((res.totalMinor || 0) / 100),
+    quantity: 1,
+    ticketType: res.purpose || "Venue Booking",
+    rawStatus: res.status,
+    status: res.status === 'pending_approval' ? 'Pending Owner Review' : res.status === 'confirmed' ? 'Confirmed by Venue Owner' : res.status === 'rejected' ? 'Declined by Venue Owner' : displayStatus(res.status),
+    ownerNotes: res.ownerNotes || '',
+    customerNotes: res.customerNotes || '',
+    bookedAt: res.createdAt,
+    isVenueReservation: true,
+  };
+};
+
 export default function DashboardPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
@@ -107,19 +134,27 @@ export default function DashboardPage() {
           // Leave unsupported/failed legacy records in local storage; they remain visible and can be retried safely by the user.
         }
       }
-      const { items = [] } = await apiRequest('/bookings/me');
-      return { items, migratedLocalBookings };
+      const [{ items: eventItems = [] }, { items: venueItems = [] }] = await Promise.all([
+        apiRequest('/bookings/me').catch(() => ({ items: [] })),
+        apiRequest('/venue-reservations/me').catch(() => ({ items: [] })),
+      ]);
+      return { eventItems, venueItems, migratedLocalBookings };
     };
     loadAndMigrateBookings()
-      .then(({ items, migratedLocalBookings }) => {
+      .then(({ eventItems, venueItems, migratedLocalBookings }) => {
         if (!active) return;
         const localByReference = new Map(migratedLocalBookings.map((item) => [item.id, item]));
-        const backendBookings = items.map((item) => normalizeBackendBooking(item, user.name)).map((item) => ({ ...item, tickets: localByReference.get(item.id)?.tickets || [] }));
-        const backendReferences = new Set(backendBookings.map((item) => item.id));
-        setBookings([...backendBookings, ...migratedLocalBookings.filter((item) => !backendReferences.has(item.id))]);
+        const backendBookings = eventItems.map((item) => normalizeBackendBooking(item, user.name)).map((item) => ({ ...item, tickets: localByReference.get(item.id)?.tickets || [] }));
+        const venueBookings = venueItems.map((item) => normalizeVenueReservation(item, user.name));
+        const backendReferences = new Set([...backendBookings.map((item) => item.id), ...venueBookings.map((item) => item.id)]);
+        setBookings([
+          ...backendBookings,
+          ...venueBookings,
+          ...migratedLocalBookings.filter((item) => !backendReferences.has(item.id))
+        ]);
         setBookingError("");
       })
-      .catch((error) => { if (active) setBookingError(error.message || "Unable to load backend bookings."); });
+      .catch((error) => { if (!active) return; setBookingError(error.message || "Unable to load backend bookings."); });
     return () => { active = false; };
   }, [user]);
   const saveBookings = (next) => {
@@ -130,21 +165,32 @@ export default function DashboardPage() {
   const cancelBooking = async (booking) => {
     if (booking.backendId) {
       try {
-        await apiRequest(`/bookings/${booking.backendId}/cancel`, { method: "PATCH" });
-        setBookings((items) => items.map((item) => item.id === booking.id ? { ...item, status: "Cancelled" } : item));
+        const endpoint = booking.isVenueReservation
+          ? `/venue-reservations/${booking.backendId}/cancel`
+          : `/bookings/${booking.backendId}/cancel`;
+        await apiRequest(endpoint, { method: "PATCH" });
+        setBookings((items) => items.map((item) => item.id === booking.id ? { ...item, status: "Cancelled", rawStatus: "cancelled" } : item));
         setBookingError("");
       } catch (error) { setBookingError(error.message || "Unable to cancel booking."); }
       return;
     }
-    saveBookings(bookings.map((item) => item.id === booking.id ? { ...item, status: "Cancelled" } : item));
+    saveBookings(bookings.map((item) => item.id === booking.id ? { ...item, status: "Cancelled", rawStatus: "cancelled" } : item));
   };
   const rescheduleBooking = (id) => {
     const nextDate = window.prompt("Enter the new event date", bookings.find((item) => item.id === id)?.date || "");
     if (nextDate?.trim()) saveBookings(bookings.map((item) => item.id === id ? { ...item, date: nextDate.trim(), status: "Rescheduled" } : item));
   };
-  const downloadBooking = (booking) => {
+  const [downloadingId, setDownloadingId] = React.useState(null);
+  const downloadBooking = async (booking) => {
     if (!canDownloadEventTickets(booking)) return;
-    downloadEventTickets({ ...booking, customerName: booking.customerName || user.name });
+    setDownloadingId(booking.id);
+    try {
+      await downloadEventTickets({ ...booking, customerName: booking.customerName || user.name });
+    } catch (err) {
+      alert(err.message || "Failed to download ticket PDF.");
+    } finally {
+      setDownloadingId(null);
+    }
   };
   const removeFavorite = (item) => {
     const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
@@ -156,7 +202,7 @@ export default function DashboardPage() {
   return <main className="dashboard-page"><Topbar active="account"/><section className="dashboard-wrap">
     <header className="dashboard-welcome"><div><p className="eyebrow">MY EVENTORIA</p><h1>Welcome, {user.name}</h1><p>Manage your account, bookings and saved experiences in one place.</p></div><span className="dashboard-avatar">{user.name?.charAt(0).toUpperCase() || "U"}</span></header>
     <div className={`dashboard-layout ${wishlistOnly ? "dashboard-hidden" : ""}`}><aside className="profile-card"><div className="profile-title"><UserRound/><div><h2>Account details</h2><span>Personal information</span></div></div><dl><div><dt>Full name</dt><dd>{user.name}</dd></div><div><dt>Email address</dt><dd><Mail/> {user.email}</dd></div><div><dt>Account role</dt><dd>{user.roles.map((role) => roleNames[role] || role).join(", ")}</dd></div><div><dt>Status</dt><dd className="profile-status"><ShieldCheck/> {user.status || "active"}</dd></div></dl></aside>
-      <section className="dashboard-content"><div className="dashboard-summary"><article><i><CalendarDays/></i><span><b>{bookings.filter((item) => item.status !== "Cancelled").length}</b><small>Upcoming bookings</small></span></article><article><i><Heart/></i><span><b>{wishlist.length}</b><small>Saved favorites</small></span></article></div><div className="dashboard-grid"><article className="dashboard-bookings"><h2>My Bookings</h2>{bookingError&&<p className="booking-error" role="alert">{bookingError}</p>}{bookings.length ? <div className="dashboard-booking-list">{bookings.map((booking) => { const ticketAvailable = canDownloadEventTickets(booking); return <div key={booking.id}><img src={booking.image} alt=""/><span><b>{booking.title}</b><small><CalendarDays/> {booking.date} · {booking.time}</small><small><MapPin/> {booking.venue}{booking.city ? `, ${booking.city}` : ""}</small><strong className={booking.status === "Cancelled" ? "cancelled" : ""}><Ticket/> {booking.status} · {booking.id}</strong><span className="booking-manage"><button disabled={!ticketAvailable} title={ticketAvailable ? "Download ticket" : "Ticket unavailable for this booking"} onClick={() => downloadBooking(booking)}>Ticket</button><button disabled={booking.status === "Cancelled" || Boolean(booking.backendId)} title={booking.backendId ? "Backend booking rescheduling is not available yet" : undefined} onClick={() => rescheduleBooking(booking.id)}>Reschedule</button><button disabled={booking.status === "Cancelled"} onClick={() => cancelBooking(booking)}>Cancel</button></span></span></div>; })}</div> : <><p>Your upcoming event tickets and venue reservations will appear here.</p><a href="/discover">Explore Events</a></>}</article><article><h2>My Wishlist</h2><p>You currently have {wishlist.length} saved {wishlist.length === 1 ? "item" : "items"} in this browser.</p><button type="button" onClick={() => setWishlistOnly(true)}>View Saved Items</button></article>{user.roles.filter((role) => rolePortals[role]).map((role) => <article key={role}><h2>{roleNames[role]} Workspace</h2><p>Open the role modules and live operational records defined by the platform HLD.</p><a href={`/portal/${rolePortals[role]}`}>Open Workspace</a></article>)}</div></section>
+      <section className="dashboard-content"><div className="dashboard-summary"><article><i><CalendarDays/></i><span><b>{bookings.filter((item) => !['Cancelled', 'cancelled', 'rejected', 'Declined by Venue Owner'].includes(item.rawStatus || item.status)).length}</b><small>Upcoming bookings</small></span></article><article><i><Heart/></i><span><b>{wishlist.length}</b><small>Saved favorites</small></span></article></div><div className="dashboard-grid"><article className="dashboard-bookings"><h2>My Bookings</h2>{bookingError&&<p className="booking-error" role="alert">{bookingError}</p>}{bookings.length ? <div className="dashboard-booking-list">{bookings.map((booking) => { const ticketAvailable = canDownloadEventTickets(booking); const isCancelledOrDeclined = ['Cancelled', 'cancelled', 'rejected', 'Declined by Venue Owner'].includes(booking.rawStatus || booking.status); return <div key={booking.id}><img src={booking.image} alt=""/><span><b>{booking.title}</b><small><CalendarDays/> {booking.date} · {booking.time}</small><small><MapPin/> {booking.venue}{booking.city ? `, ${booking.city}` : ""}</small><strong className={isCancelledOrDeclined ? "cancelled" : ""}><Ticket/> {booking.status} · {booking.id}</strong>{booking.ownerNotes && <div style={{ margin: '6px 0', padding: '8px 12px', background: ['rejected', 'Declined by Venue Owner'].includes(booking.rawStatus || booking.status) ? '#fef3f2' : '#f0fdf4', border: `1px solid ${['rejected', 'Declined by Venue Owner'].includes(booking.rawStatus || booking.status) ? '#fecdca' : '#bbf7d0'}`, borderRadius: 6, fontSize: 12, color: ['rejected', 'Declined by Venue Owner'].includes(booking.rawStatus || booking.status) ? '#b42318' : '#097948' }}><b>{['rejected', 'Declined by Venue Owner'].includes(booking.rawStatus || booking.status) ? 'Reason / Notes from Venue Owner: ' : 'Note from Venue Owner: '}</b>{booking.ownerNotes}</div>}<span className="booking-manage"><button disabled={!ticketAvailable || downloadingId === booking.id} title={ticketAvailable ? "Download ticket PDF" : "Ticket unavailable for this booking"} onClick={() => downloadBooking(booking)}>{downloadingId === booking.id ? "Preparing…" : "Ticket"}</button>{!booking.isVenueReservation && <button disabled={isCancelledOrDeclined || Boolean(booking.backendId)} title={booking.backendId ? "Backend booking rescheduling is not available yet" : undefined} onClick={() => rescheduleBooking(booking.id)}>Reschedule</button>}<button disabled={isCancelledOrDeclined} onClick={() => cancelBooking(booking)}>Cancel</button></span></span></div>; })}</div> : <><p>Your upcoming event tickets and venue reservations will appear here.</p><a href="/discover">Explore Events</a></>}</article><article><h2>My Wishlist</h2><p>You currently have {wishlist.length} saved {wishlist.length === 1 ? "item" : "items"} in this browser.</p><button type="button" onClick={() => setWishlistOnly(true)}>View Saved Items</button></article>{user.roles.filter((role) => rolePortals[role]).map((role) => <article key={role}><h2>{roleNames[role]} Workspace</h2><p>Open the role modules and live operational records defined by the platform HLD.</p><a href={`/portal/${rolePortals[role]}`}>Open Workspace</a></article>)}</div></section>
     </div>
     <section className={`dashboard-wishlist ${wishlistOnly ? "wishlist-focus" : ""}`} id="wishlist"><header><div><p className="eyebrow">SAVED FOR LATER</p><h2>My Wishlist</h2><p>Your saved events and venues are available directly here.</p></div><div className="wishlist-head-actions"><span>{wishlist.length} {wishlist.length === 1 ? "item" : "items"}</span>{wishlistOnly&&<button type="button" onClick={() => setWishlistOnly(false)}>Back to Dashboard</button>}</div></header>{wishlist.length ? <div className="dashboard-wishlist-grid">{wishlist.map((item) => <article key={item.key}><div className="dashboard-wishlist-image"><img src={item.image} alt={item.kind === "event" ? item.title : item.name}/><span>{item.kind === "event" ? "Event" : "Venue"}</span><button onClick={() => removeFavorite(item)} aria-label={`Remove ${item.kind === "event" ? item.title : item.name} from wishlist`}><Trash2/></button></div><div><h3>{item.kind === "event" ? item.title : item.name}</h3>{item.kind === "event" ? <><p><CalendarDays/> {item.day} {item.month} · {item.time}</p><p><MapPin/> {item.venue}, {item.city}</p><strong>{item.price}</strong><a href="/discover">View Event</a></> : <><p><MapPin/> {item.city}, Tamil Nadu</p><p><Users/> {item.guests} guests</p><strong>₹ {item.price.toLocaleString("en-IN")}/day</strong><a href="/venues">View Venue</a></>}</div></article>)}</div> : <div className="dashboard-wishlist-empty"><Heart/><h3>Your wishlist is empty</h3><p>Save events or venues using the heart icon and they will appear here.</p><a href="/discover">Explore Events</a><a href="/venues">Browse Venues</a></div>}</section>
   </section><SiteFooter/></main>;

@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowRight, BarChart3, CalendarDays, Check, FileText, Headphones, Image, MapPin, Megaphone, Play, Settings, ShieldCheck, Ticket, Users } from "lucide-react";
+import { ArrowRight, BarChart3, CalendarDays, Check, Clock, FileText, Headphones, Image, MapPin, Megaphone, Play, Settings, ShieldCheck, Ticket, Users } from "lucide-react";
 import { Topbar } from "./CatalogPage.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
 import { apiRequest } from "../../services/apiClient.js";
@@ -33,24 +33,131 @@ const categoryOptions = {
 };
 const categories = Object.keys(categoryOptions);
 
+function to24Hour(timeStr, ampm) {
+  if (!timeStr) return '10:00';
+  const parts = String(timeStr).trim().split(':');
+  let h = parseInt(parts[0], 10);
+  let m = parts[1] !== undefined ? parseInt(parts[1], 10) : 0;
+  if (isNaN(h)) h = 10;
+  if (isNaN(m)) m = 0;
+  h = Math.max(1, Math.min(12, h));
+  m = Math.max(0, Math.min(59, m));
+  if (ampm === 'PM' && h < 12) h += 12;
+  else if (ampm === 'AM' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function formatScheduleDisplay(dateStr, timeStr, ampm) {
+  if (!dateStr) return '';
+  try {
+    const [year, month, day] = dateStr.split('-');
+    const dateObj = new Date(Number(year), Number(month) - 1, Number(day));
+    const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+    const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' });
+    return `✓ Scheduled: ${dayName}, ${day} ${monthName} ${year} at ${timeStr || '10:00'} ${ampm}`;
+  } catch {
+    return `✓ ${dateStr} at ${timeStr || '10:00'} ${ampm}`;
+  }
+}
+
 export default function OrganizePage() {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const isOrganizer = user?.roles?.includes('event_organizer');
   const [application, setApplication] = React.useState(null);
-  const [profile, setProfile] = React.useState({ organizationName:'', phone:'', website:'', address:'', panGst:'', bankAccount:'', description:'' });
+  const [profile, setProfile] = React.useState({
+    organizationName: '',
+    phone: '',
+    website: '',
+    address: '',
+    panGst: '',
+    bankAccount: '',
+    description: '',
+    eventCategory: 'Entertainment',
+    eventSubcategory: 'Concert',
+    plannedEventTitle: '',
+    targetCity: '',
+    expectedAttendees: '100 - 500',
+    eventType: 'in-person',
+  });
+  const [editingPending, setEditingPending] = React.useState(false);
   const [step, setStep] = React.useState(0);
   const [notice, setNotice] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [form, setForm] = React.useState({ title: "", category: "", subcategory: "", description: "", type: "in-person", venueName: "", city: "", address: "", startsAt: "", endsAt: "", ticketName: "General Admission", price: "499", capacity: "100", image: "" });
+
+  const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
+  const [startDate, setStartDate] = React.useState('');
+  const [startTime, setStartTime] = React.useState('10:00');
+  const [startAmPm, setStartAmPm] = React.useState('AM');
+
+  const [endDate, setEndDate] = React.useState('');
+  const [endTime, setEndTime] = React.useState('01:00');
+  const [endAmPm, setEndAmPm] = React.useState('PM');
+
+  React.useEffect(() => {
+    if (startDate) {
+      const time24 = to24Hour(startTime, startAmPm);
+      setForm((curr) => ({ ...curr, startsAt: `${startDate}T${time24}` }));
+    } else {
+      setForm((curr) => ({ ...curr, startsAt: '' }));
+    }
+  }, [startDate, startTime, startAmPm]);
+
+  React.useEffect(() => {
+    if (endDate) {
+      const time24 = to24Hour(endTime, endAmPm);
+      setForm((curr) => ({ ...curr, endsAt: `${endDate}T${time24}` }));
+    } else {
+      setForm((curr) => ({ ...curr, endsAt: '' }));
+    }
+  }, [endDate, endTime, endAmPm]);
+
   const [imageMode, setImageMode] = React.useState('upload');
   const [uploadingImage, setUploadingImage] = React.useState(false);
   const [imageUpload, setImageUpload] = React.useState({ status:'idle', fileName:'', error:'' });
   const update = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
-  React.useEffect(() => { if (user && !isOrganizer) apiRequest('/organizer/applications/me').then(result => setApplication(result.items?.[0] || null)).catch(() => {}); }, [user, isOrganizer]);
+  React.useEffect(() => {
+    if (user && !isOrganizer) {
+      apiRequest('/organizer/applications/me')
+        .then((result) => {
+          const app = result.items?.[0] || null;
+          setApplication(app);
+          if (app?.details) {
+            setProfile((prev) => ({
+              ...prev,
+              ...app.details,
+              eventCategory: app.details.eventCategory || 'Entertainment',
+              eventSubcategory: app.details.eventSubcategory || 'Concert',
+            }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user, isOrganizer]);
   React.useEffect(() => { if (location.hash === '#become-organizer') window.setTimeout(() => document.getElementById('become-organizer')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0); }, [location.hash]);
-  const submitProfile = async event => { event.preventDefault(); setSaving(true); setNotice(''); try { const result = await apiRequest('/organizer/applications', { method:'POST', body:JSON.stringify({ details:profile }) }); setApplication(result.application); setNotice('Organizer profile submitted. An administrator will review it.'); } catch (error) { setNotice(error.message); } finally { setSaving(false); } };
+  const submitProfile = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setNotice('');
+    try {
+      const isUpdating = Boolean(application && application.status === 'pending');
+      const method = isUpdating ? 'PUT' : 'POST';
+      const endpoint = isUpdating ? '/organizer/applications/pending' : '/organizer/applications';
+      const result = await apiRequest(endpoint, {
+        method,
+        body: JSON.stringify({ details: profile }),
+      });
+      setApplication(result.application);
+      setEditingPending(false);
+      setNotice(isUpdating ? 'Your event proposal and organizer profile were updated for admin review.' : 'Organizer application submitted with event details. An administrator will review it.');
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
   const chooseImage = event => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -114,7 +221,259 @@ export default function OrganizePage() {
       <div>{quickSteps.map(([title, text, Icon], index) => <React.Fragment key={title}><article><b>{index + 1}</b><i><Icon/></i><h3>{title}</h3><p>{text}</p></article>{index < 3 && <ArrowRight className="org-step-arrow"/>}</React.Fragment>)}</div>
     </section>
 
-    {!isOrganizer && <section id="become-organizer" className="organizer-onboarding"><div><p className="org-kicker">BECOME AN ORGANIZER</p><h2>Complete your organizer profile</h2><p>Submit your organization, contact, compliance and settlement details for admin approval.</p>{!user && <p className="onboarding-callout">Sign in or create an account first, then complete your organizer profile.<span><Link to="/auth/login" state={{ from:'/organize#become-organizer' }}>Sign in</Link><Link to="/auth/register" state={{ from:'/organize#become-organizer' }}>Create account</Link></span></p>}{application && <div className="application-state"><ShieldCheck/><span><b>Application {application.status}</b><small>{application.feedback || (application.status === 'pending' ? 'Your profile is under admin review.' : 'Sign in again after approval to open your organizer workspace.')}</small></span></div>}</div>{user && !application && <form onSubmit={submitProfile}><label>Organization / brand name<input required value={profile.organizationName} onChange={e => setProfile({...profile,organizationName:e.target.value})}/></label><label>Mobile number<input required value={profile.phone} onChange={e => setProfile({...profile,phone:e.target.value})}/></label><label>Website / social link<input type="url" value={profile.website} onChange={e => setProfile({...profile,website:e.target.value})}/></label><label>Business address<input required value={profile.address} onChange={e => setProfile({...profile,address:e.target.value})}/></label><label>PAN / GST (optional)<input value={profile.panGst} onChange={e => setProfile({...profile,panGst:e.target.value})}/></label><label>Bank account / UPI for settlements<input required value={profile.bankAccount} onChange={e => setProfile({...profile,bankAccount:e.target.value})}/></label><label className="wide">Organizer description<textarea required minLength="20" value={profile.description} onChange={e => setProfile({...profile,description:e.target.value})}/></label><button disabled={saving}>{saving ? 'Submitting…' : 'Submit for approval'} <ArrowRight/></button></form>}</section>}
+    {!isOrganizer && (
+      <section id="become-organizer" className="organizer-onboarding">
+        <div>
+          <p className="org-kicker">BECOME AN ORGANIZER</p>
+          <h2>Complete your organizer profile & event proposal</h2>
+          <p>
+            Tell the administrator what kind of events you plan to organize, along with your organization and settlement details for quick approval.
+          </p>
+          {!user && (
+            <p className="onboarding-callout">
+              Sign in or create an account first, then complete your organizer profile.
+              <span>
+                <Link to="/auth/login" state={{ from: '/organize#become-organizer' }}>Sign in</Link>
+                <Link to="/auth/register" state={{ from: '/organize#become-organizer' }}>Create account</Link>
+              </span>
+            </p>
+          )}
+
+          {application && !editingPending && (
+            <div style={{ marginTop: 14 }}>
+              <div className="application-state">
+                <ShieldCheck />
+                <span>
+                  <b>Application {application.status?.toUpperCase()}</b>
+                  <small>
+                    {application.feedback ||
+                      (application.status === 'pending'
+                        ? 'Your event proposal and organizer profile are currently under admin review.'
+                        : 'Sign in again after approval to open your organizer workspace.')}
+                  </small>
+                </span>
+              </div>
+
+              {/* Submitted Event Proposal Summary */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '16px 18px', marginTop: 14 }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: 15, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <CalendarDays size={16} color="#2563eb" /> Proposed Event Details Sent to Admin
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, fontSize: 13, marginBottom: 12 }}>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: 11, fontWeight: 600, display: 'block' }}>EVENT CATEGORY</span>
+                    <b style={{ color: '#0f172a' }}>{profile.eventCategory || 'Entertainment'} {profile.eventSubcategory ? `· ${profile.eventSubcategory}` : ''}</b>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: 11, fontWeight: 600, display: 'block' }}>PROPOSED EVENT</span>
+                    <b style={{ color: '#0f172a' }}>{profile.plannedEventTitle || 'General Event Showcase'}</b>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: 11, fontWeight: 600, display: 'block' }}>TARGET CITY</span>
+                    <b style={{ color: '#0f172a' }}>{profile.targetCity || profile.address || 'Tamil Nadu'}</b>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: 11, fontWeight: 600, display: 'block' }}>EXPECTED AUDIENCE</span>
+                    <b style={{ color: '#0f172a' }}>{profile.expectedAttendees || '100 - 500'} attendees</b>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12, color: '#475569', background: '#fff', border: '1px solid #e2e8f0', padding: '10px 12px', borderRadius: 8, marginBottom: 12 }}>
+                  <b>Organization:</b> {profile.organizationName || 'Not specified'} · <b>Phone:</b> {profile.phone || 'Not specified'}
+                  <p style={{ margin: '4px 0 0', color: '#64748b' }}>{profile.description}</p>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {application.status === 'pending' && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingPending(true)}
+                      style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      ✏️ Edit / Change Event Category & Proposal
+                    </button>
+                  )}
+                  <small style={{ color: '#64748b' }}>
+                    Admins can view and approve your application directly from the Admin Workspace.
+                  </small>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {user && (!application || editingPending) && (
+          <form onSubmit={submitProfile} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* 1. EVENT SPECIFICATION SECTION */}
+            <div style={{ background: '#eff6ff', border: '1.5px solid #bfdbfe', borderRadius: 10, padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#1d4ed8' }}>
+                <CalendarDays size={18} />
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1e40af' }}>
+                  1. What Kind of Event Are You Planning to Organize?
+                </h3>
+              </div>
+              <p style={{ margin: 0, fontSize: 12, color: '#3b82f6', lineHeight: 1.4 }}>
+                This tells the administrator your event genre, theme, and audience scale so they can review and approve your application quickly.
+              </p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
+                  Event Category <em>*</em>
+                  <select
+                    required
+                    value={profile.eventCategory}
+                    onChange={(e) => setProfile({ ...profile, eventCategory: e.target.value, eventSubcategory: (categoryOptions[e.target.value] || [])[0] || '' })}
+                    style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
+                  Subcategory / Specific Type <em>*</em>
+                  <select
+                    required
+                    value={profile.eventSubcategory}
+                    onChange={(e) => setProfile({ ...profile, eventSubcategory: e.target.value })}
+                    style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
+                  >
+                    <option value="">Select subcategory</option>
+                    {(categoryOptions[profile.eventCategory] || []).map((sub) => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
+                  Proposed Event Title / Concept <em>*</em>
+                  <input
+                    required
+                    placeholder="e.g. South India Music Festival 2026, Startup Innovation Summit"
+                    value={profile.plannedEventTitle}
+                    onChange={(e) => setProfile({ ...profile, plannedEventTitle: e.target.value })}
+                    style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
+                  />
+                </label>
+
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
+                  Target City <em>*</em>
+                  <input
+                    required
+                    placeholder="e.g. Chennai, Salem, Hyderabad"
+                    value={profile.targetCity}
+                    onChange={(e) => setProfile({ ...profile, targetCity: e.target.value })}
+                    style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
+                  Expected Audience Scale <em>*</em>
+                  <select
+                    required
+                    value={profile.expectedAttendees}
+                    onChange={(e) => setProfile({ ...profile, expectedAttendees: e.target.value })}
+                    style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
+                  >
+                    <option value="Under 100">Under 100 attendees</option>
+                    <option value="100 - 500">100 – 500 attendees</option>
+                    <option value="500 - 1,500">500 – 1,500 attendees</option>
+                    <option value="1,500 - 5,000">1,500 – 5,000 attendees</option>
+                    <option value="5,000+">5,000+ attendees</option>
+                  </select>
+                </label>
+
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
+                  Event Format <em>*</em>
+                  <select
+                    required
+                    value={profile.eventType}
+                    onChange={(e) => setProfile({ ...profile, eventType: e.target.value })}
+                    style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
+                  >
+                    <option value="in-person">In-Person Event</option>
+                    <option value="online">Online / Virtual Event</option>
+                    <option value="hybrid">Hybrid Event</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            {/* 2. ORGANIZATION & PROFILE DETAILS */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#334155' }}>
+                2. Organization & Settlement Information
+              </h3>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <label>
+                  Organization / brand name <em>*</em>
+                  <input required value={profile.organizationName} onChange={(e) => setProfile({ ...profile, organizationName: e.target.value })} />
+                </label>
+                <label>
+                  Mobile number <em>*</em>
+                  <input required value={profile.phone} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <label>
+                  Website / social link
+                  <input type="url" placeholder="https://instagram.com/your-brand" value={profile.website} onChange={(e) => setProfile({ ...profile, website: e.target.value })} />
+                </label>
+                <label>
+                  Business address <em>*</em>
+                  <input required value={profile.address} onChange={(e) => setProfile({ ...profile, address: e.target.value })} />
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <label>
+                  Bank account / UPI for ticket settlements <em>*</em>
+                  <input required placeholder="Account No. / UPI ID" value={profile.bankAccount} onChange={(e) => setProfile({ ...profile, bankAccount: e.target.value })} />
+                </label>
+                <label>
+                  PAN / GST (optional)
+                  <input value={profile.panGst} onChange={(e) => setProfile({ ...profile, panGst: e.target.value })} />
+                </label>
+              </div>
+
+              <label className="wide">
+                Organizer experience & event proposal description <em>*</em>
+                <textarea
+                  required
+                  rows={3}
+                  minLength="20"
+                  placeholder="Tell the administrator about your experience organizing events and what you plan to accomplish..."
+                  value={profile.description}
+                  onChange={(e) => setProfile({ ...profile, description: e.target.value })}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button disabled={saving} type="submit" style={{ flex: 1, padding: '12px' }}>
+                {saving ? 'Submitting…' : editingPending ? 'Update Event Proposal & Profile' : 'Submit for Admin Approval'} <ArrowRight size={16} />
+              </button>
+              {editingPending && (
+                <button
+                  type="button"
+                  onClick={() => setEditingPending(false)}
+                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '12px 18px', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </form>
+        )}
+      </section>
+    )}
 
     {isOrganizer && <section id="event-builder" className="org-builder">
       <aside>{steps.map(([title, text, Icon], index) => <button type="button" disabled={index > step} className={step === index ? "active" : ""} onClick={() => setStep(index)} key={title}><b>{index + 1}</b><span><strong>{title}</strong><small>{text}</small></span><Icon/></button>)}</aside>
@@ -124,7 +483,185 @@ export default function OrganizePage() {
           <div className="org-form-grid"><label>Event Title <em>*</em><input value={form.title} onChange={update("title")} placeholder="Enter event title" required/></label><label>Event Category <em>*</em><select value={form.category} onChange={(event) => setForm(current => ({ ...current, category: event.target.value, subcategory: "" }))} required><option value="">Select category</option>{categories.map(category => <option key={category}>{category}</option>)}</select></label><label>Subcategory <em>*</em><select value={form.subcategory} onChange={update("subcategory")} required><option value="">Select subcategory</option>{(categoryOptions[form.category] || []).map(value => <option key={value}>{value}</option>)}</select></label></div>
           <label>Short Description <em>*</em><textarea minLength="20" maxLength="200" value={form.description} onChange={update("description")} placeholder="Write at least 20 characters about your event..." required/><small>{form.description.length}/200</small></label>
           <fieldset><legend>Event Type <em>*</em></legend>{[["online","Online Event"],["in-person","In-Person Event"],["hybrid","Hybrid Event"]].map(([value,label]) => <label key={value}><input type="radio" name="eventType" value={value} checked={form.type === value} onChange={update("type")}/><span/>{label}</label>)}</fieldset>
-        </> : step === 1 ? <div className="org-form-grid"><label>Venue Name <em>*</em><input value={form.venueName} onChange={update("venueName")} required/></label><label>City <em>*</em><input value={form.city} onChange={update("city")} required/></label><label>Address<input value={form.address} onChange={update("address")}/></label><label>Starts At <em>*</em><input type="datetime-local" value={form.startsAt} onChange={update("startsAt")} required/></label><label>Ends At <em>*</em><input type="datetime-local" value={form.endsAt} onChange={update("endsAt")} required/></label></div> : step === 2 ? <div className="org-form-grid"><label>Ticket Name <em>*</em><input value={form.ticketName} onChange={update("ticketName")} required/></label><label>Price (INR) <em>*</em><input type="number" min="0" value={form.price} onChange={update("price")} required/></label><label>Capacity <em>*</em><input type="number" min="1" value={form.capacity} onChange={update("capacity")} required/></label></div> : step === 3 ? <div className="event-media-field"><div className="media-mode"><button type="button" className={imageMode === 'upload' ? 'active' : ''} onClick={() => setImageMode('upload')}>Upload image</button><button type="button" className={imageMode === 'url' ? 'active' : ''} onClick={() => setImageMode('url')}>Use image URL</button></div>{imageMode === 'upload' ? <label className={`event-upload ${uploadingImage ? 'uploading' : ''}`}><Image/><b>{uploadingImage ? 'Uploading to Cloudinary…' : 'Choose event banner'}</b><span>JPG, PNG or WebP · maximum 3 MB</span><input disabled={uploadingImage} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage}/></label> : <label>Public image URL<input type="url" value={form.image} onChange={update("image")} placeholder="https://example.com/event-banner.jpg"/></label>}{imageMode === 'upload' && imageUpload.status !== 'idle' && <div className={`image-upload-status ${imageUpload.status}`} role="status">{imageUpload.status === 'uploading' && <i/>}{imageUpload.status === 'success' && <Check/>}<span><b>{imageUpload.status === 'uploading' ? 'Uploading image…' : imageUpload.status === 'success' ? 'Uploaded successfully to Cloudinary' : 'Upload failed'}</b><small>{imageUpload.status === 'error' ? imageUpload.error : imageUpload.fileName}</small></span></div>}{form.image && <div className="event-image-preview"><img src={form.image} alt="Event banner preview"/><button type="button" onClick={() => { setForm(current => ({ ...current, image:'' })); setImageUpload({ status:'idle', fileName:'', error:'' }); }}>Remove image</button></div>}</div> : <div className="org-step-placeholder"><Check/><h3>Ready for approval</h3><p>Submitting sends this event to the Admin workspace. Customers see it only after approval.</p></div>}
+        </> : step === 1 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="org-form-grid" style={{ marginBottom: 0 }}>
+              <label>Venue Name <em>*</em><input value={form.venueName} onChange={update("venueName")} placeholder="e.g. Royal Grand Palace" required/></label>
+              <label>City <em>*</em><input value={form.city} onChange={update("city")} placeholder="e.g. Chennai" required/></label>
+              <label style={{ gridColumn: '1 / -1' }}>Address<input value={form.address} onChange={update("address")} placeholder="e.g. 100 Mount Road, Guindy"/></label>
+            </div>
+
+            {/* Clear Date & 12-Hour Time with AM / PM Toggle */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+              {/* Starts At Box */}
+              <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a', fontWeight: 700, fontSize: '13px' }}>
+                    <CalendarDays size={16} color="#e11d48" /> Starts At <em>*</em>
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>12-Hour (AM / PM)</span>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', color: '#475569', fontWeight: 600, display: 'block', marginBottom: '5px' }}>
+                    Event Date <em>*</em>
+                  </label>
+                  <input
+                    type="date"
+                    min={todayStr}
+                    value={startDate}
+                    required
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      if (!endDate) setEndDate(e.target.value);
+                    }}
+                    style={{ width: '100%', height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '14px', color: '#1e293b' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', color: '#475569', fontWeight: 600, display: 'block', marginBottom: '5px' }}>
+                    Enter Time & Select AM / PM <em>*</em>
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="10:00"
+                      maxLength={5}
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value.replace(/[^0-9:]/g, ''))}
+                      required
+                      title="Enter time like 10:00, 11:30, 06:00"
+                      style={{ flex: 1, height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '15px', fontWeight: 600, textAlign: 'center', color: '#1e293b' }}
+                    />
+                    <div style={{ display: 'inline-flex', borderRadius: '8px', overflow: 'hidden', border: '1.5px solid #cbd5e1', background: '#fff' }}>
+                      <button
+                        type="button"
+                        onClick={() => setStartAmPm('AM')}
+                        style={{
+                          padding: '0 16px',
+                          height: '38px',
+                          border: 0,
+                          fontWeight: 700,
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          background: startAmPm === 'AM' ? '#e11d48' : '#fff',
+                          color: startAmPm === 'AM' ? '#fff' : '#64748b'
+                        }}
+                      >
+                        AM
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStartAmPm('PM')}
+                        style={{
+                          padding: '0 16px',
+                          height: '38px',
+                          border: 0,
+                          fontWeight: 700,
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          background: startAmPm === 'PM' ? '#e11d48' : '#fff',
+                          color: startAmPm === 'PM' ? '#fff' : '#64748b'
+                        }}
+                      >
+                        PM
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {startDate && (
+                  <div style={{ fontSize: '11px', color: '#047857', background: '#ecfdf5', padding: '6px 10px', borderRadius: '6px', border: '1px solid #a7f3d0', fontWeight: 600 }}>
+                    {formatScheduleDisplay(startDate, startTime, startAmPm)}
+                  </div>
+                )}
+              </div>
+
+              {/* Ends At Box */}
+              <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a', fontWeight: 700, fontSize: '13px' }}>
+                    <Clock size={16} color="#e11d48" /> Ends At <em>*</em>
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>12-Hour (AM / PM)</span>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', color: '#475569', fontWeight: 600, display: 'block', marginBottom: '5px' }}>
+                    Event Date <em>*</em>
+                  </label>
+                  <input
+                    type="date"
+                    min={startDate || todayStr}
+                    value={endDate}
+                    required
+                    onChange={(e) => setEndDate(e.target.value)}
+                    style={{ width: '100%', height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '14px', color: '#1e293b' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', color: '#475569', fontWeight: 600, display: 'block', marginBottom: '5px' }}>
+                    Enter Time & Select AM / PM <em>*</em>
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="01:00"
+                      maxLength={5}
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value.replace(/[^0-9:]/g, ''))}
+                      required
+                      title="Enter time like 01:00, 09:30, 11:00"
+                      style={{ flex: 1, height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '15px', fontWeight: 600, textAlign: 'center', color: '#1e293b' }}
+                    />
+                    <div style={{ display: 'inline-flex', borderRadius: '8px', overflow: 'hidden', border: '1.5px solid #cbd5e1', background: '#fff' }}>
+                      <button
+                        type="button"
+                        onClick={() => setEndAmPm('AM')}
+                        style={{
+                          padding: '0 16px',
+                          height: '38px',
+                          border: 0,
+                          fontWeight: 700,
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          background: endAmPm === 'AM' ? '#e11d48' : '#fff',
+                          color: endAmPm === 'AM' ? '#fff' : '#64748b'
+                        }}
+                      >
+                        AM
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEndAmPm('PM')}
+                        style={{
+                          padding: '0 16px',
+                          height: '38px',
+                          border: 0,
+                          fontWeight: 700,
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          background: endAmPm === 'PM' ? '#e11d48' : '#fff',
+                          color: endAmPm === 'PM' ? '#fff' : '#64748b'
+                        }}
+                      >
+                        PM
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {endDate && (
+                  <div style={{ fontSize: '11px', color: '#047857', background: '#ecfdf5', padding: '6px 10px', borderRadius: '6px', border: '1px solid #a7f3d0', fontWeight: 600 }}>
+                    {formatScheduleDisplay(endDate, endTime, endAmPm)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : step === 2 ? <div className="org-form-grid"><label>Ticket Name <em>*</em><input value={form.ticketName} onChange={update("ticketName")} required/></label><label>Price (INR) <em>*</em><input type="number" min="0" value={form.price} onChange={update("price")} required/></label><label>Capacity <em>*</em><input type="number" min="1" value={form.capacity} onChange={update("capacity")} required/></label></div> : step === 3 ? <div className="event-media-field"><div className="media-mode"><button type="button" className={imageMode === 'upload' ? 'active' : ''} onClick={() => setImageMode('upload')}>Upload image</button><button type="button" className={imageMode === 'url' ? 'active' : ''} onClick={() => setImageMode('url')}>Use image URL</button></div>{imageMode === 'upload' ? <label className={`event-upload ${uploadingImage ? 'uploading' : ''}`}><Image/><b>{uploadingImage ? 'Uploading to Cloudinary…' : 'Choose event banner'}</b><span>JPG, PNG or WebP · maximum 3 MB</span><input disabled={uploadingImage} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage}/></label> : <label>Public image URL<input type="url" value={form.image} onChange={update("image")} placeholder="https://example.com/event-banner.jpg"/></label>}{imageMode === 'upload' && imageUpload.status !== 'idle' && <div className={`image-upload-status ${imageUpload.status}`} role="status">{imageUpload.status === 'uploading' && <i/>}{imageUpload.status === 'success' && <Check/>}<span><b>{imageUpload.status === 'uploading' ? 'Uploading image…' : imageUpload.status === 'success' ? 'Uploaded successfully to Cloudinary' : 'Upload failed'}</b><small>{imageUpload.status === 'error' ? imageUpload.error : imageUpload.fileName}</small></span></div>}{form.image && <div className="event-image-preview"><img src={form.image} alt="Event banner preview"/><button type="button" onClick={() => { setForm(current => ({ ...current, image:'' })); setImageUpload({ status:'idle', fileName:'', error:'' }); }}>Remove image</button></div>}</div> : <div className="org-step-placeholder"><Check/><h3>Ready for approval</h3><p>Submitting sends this event to the Admin workspace. Customers see it only after approval.</p></div>}
         <div className="org-form-actions"><button type="button" className="draft" disabled={saving || uploadingImage} onClick={() => saveEvent(false)}>Save as Draft</button><button disabled={saving || uploadingImage} type={step === 4 ? "submit" : "button"} onClick={(event) => step < 4 && event.currentTarget.form.reportValidity() && setStep(step + 1)}>{saving ? "Saving..." : step === 4 ? "Submit Event" : "Next Step"} <ArrowRight/></button></div>
         {notice && <div className={`org-saved ${/required|failed|error|expired|cannot|invalid/i.test(notice) ? 'error' : ''}`}><Check/> {notice}</div>}
       </form>

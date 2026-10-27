@@ -16,6 +16,7 @@ export default function OrganizerPortalPage({ user }) {
   const [eventId, setEventId] = React.useState('');
   const [staff, setStaff] = React.useState([]);
   const [staffId, setStaffId] = React.useState('');
+  const [assignedStaff, setAssignedStaff] = React.useState([]);
   const [query, setQuery] = React.useState('');
   const [notice, setNotice] = React.useState('');
   const [busy, setBusy] = React.useState(true);
@@ -31,16 +32,29 @@ export default function OrganizerPortalPage({ user }) {
     finally { setBusy(false); }
   }, []);
   React.useEffect(() => { load(); }, [load]);
-  React.useEffect(() => { if (!eventId) return setAttendees([]); apiRequest(`/organizer/events/${eventId}/attendees`).then(result => setAttendees(result.items || [])).catch(error => setNotice(error.message)); }, [eventId]);
+  React.useEffect(() => {
+    if (!eventId) { setAttendees([]); setAssignedStaff([]); return; }
+    apiRequest(`/organizer/events/${eventId}/attendees`).then(result => setAttendees(result.items || [])).catch(error => setNotice(error.message));
+    apiRequest(`/organizer/events/${eventId}/staff`).then(result => setAssignedStaff(result.items || [])).catch(() => setAssignedStaff([]));
+  }, [eventId]);
 
-  const act = async (path, options, success) => { try { await apiRequest(path, options); setNotice(success); await load(); } catch (error) { setNotice(error.message); } };
+  const act = async (path, options, success) => {
+    try {
+      await apiRequest(path, options);
+      setNotice(success);
+      await load();
+      if (eventId) {
+        apiRequest(`/organizer/events/${eventId}/staff`).then(result => setAssignedStaff(result.items || [])).catch(() => {});
+      }
+    } catch (error) { setNotice(error.message); }
+  };
   const downloadCsv = () => {
     const rows = [['Booking reference','Event','Customer','Email','Quantity','Amount','Payment','Refund'], ...bookings.map(item => [item.bookingReference,item.event?.title,item.customer?.name,item.customer?.email,item.quantity,(item.totalMinor || 0) / 100,item.paymentStatus,item.refundStatus])];
     const csv = rows.map(row => row.map(value => `"${String(value ?? '').replaceAll('"','""')}"`).join(',')).join('\n');
     const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); link.download = 'eventoria-organizer-bookings.csv'; link.click(); URL.revokeObjectURL(link.href);
   };
   const filtered = bookings.filter(item => `${item.bookingReference} ${item.event?.title} ${item.customer?.name} ${item.customer?.email}`.toLowerCase().includes(query.toLowerCase()));
-  const tabs = [['overview','Overview'],['events','My Events'],['bookings','Bookings'],['attendees','Attendees'],['refunds','Refunds'],['reports','Reports & Settlement']];
+  const tabs = [['overview','Overview'],['events','My Events'],['bookings','Bookings'],['attendees','Attendees'],['staff','Event Staff & Check-in'],['refunds','Refunds'],['reports','Reports & Settlement']];
   const stats = [[CalendarDays,'Events',report.events || 0],[TicketCheck,'Tickets booked',report.bookings || 0],[Users,'Checked in',report.checkedIn || 0],[CircleDollarSign,'Net payable',money(report.netMinor)]];
 
   return <div className="organizer-console">
@@ -53,6 +67,86 @@ export default function OrganizerPortalPage({ user }) {
       {tab === 'bookings' && <section className="organizer-panel"><header><div><h2>Bookings</h2><p>Search customers and monitor payment status in real time.</p></div><div className="table-actions"><label><Search/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search bookings"/></label><button onClick={downloadCsv}><Download/> Export CSV</button></div></header><BookingTable items={filtered}/></section>}
       {tab === 'attendees' && <section className="staff-assignment"><b>Assign event staff</b><select value={staffId} onChange={e => setStaffId(e.target.value)}><option value="">Select staff member</option>{staff.map(item => <option value={item._id} key={item._id}>{item.name} · {item.email}</option>)}</select><button disabled={!eventId || !staffId} onClick={() => act('/organizer/events/' + eventId + '/staff', { method:'POST', body:JSON.stringify({ staffId }) }, 'Event staff assigned with check-in access.')}>Assign to selected event</button></section>}
       {tab === 'attendees' && <section className="organizer-panel"><header><div><h2>Attendee management</h2><p>Confirmed ticket holders and live check-in status.</p></div><div className="attendee-tools"><select value={eventId} onChange={e => setEventId(e.target.value)}>{events.map(item => <option value={item._id} key={item._id}>{item.title}</option>)}</select>{eventId && <Link to={'/scanner?eventId=' + eventId}><ScanLine/> Open Check-in Scanner</Link>}</div></header><div className="organizer-table"><table><thead><tr><th>Attendee</th><th>Ticket</th><th>Booking</th><th>Status</th><th>Checked in</th></tr></thead><tbody>{attendees.map(item => <tr key={item._id}><td><b>{item.owner?.name}</b><small>{item.owner?.email}</small></td><td>{item.code}</td><td>{item.booking?.bookingReference}</td><td><Status value={item.status}/></td><td>{item.checkedInAt ? date(item.checkedInAt) : '—'}</td></tr>)}</tbody></table>{!attendees.length && <Empty text="No issued tickets for this event yet."/>}</div></section>}
+      {tab === 'staff' && (
+        <section className="organizer-panel">
+          <header>
+            <div>
+              <h2>Event Staff & Gate Access</h2>
+              <p>Assign qualified staff to manage entry, scan attendee QR codes, and monitor attendance.</p>
+            </div>
+            <div className="attendee-tools">
+              <select value={eventId} onChange={e => setEventId(e.target.value)}>
+                {events.map(item => <option value={item._id} key={item._id}>{item.title}</option>)}
+              </select>
+              {eventId && <Link to={'/scanner?eventId=' + eventId}><ScanLine/> Open Gate Scanner</Link>}
+            </div>
+          </header>
+
+          <div style={{ margin: '16px 0', padding: '16px 20px', background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '14px' }}>
+            <div style={{ flex: 1, minWidth: '220px' }}>
+              <label style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                SELECT ACTIVE EVENT STAFF
+              </label>
+              <select value={staffId} onChange={e => setStaffId(e.target.value)} style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '13px' }}>
+                <option value="">Select an event staff member</option>
+                {staff.map(item => <option value={item._id} key={item._id}>{item.name} ({item.email})</option>)}
+              </select>
+            </div>
+            <div style={{ alignSelf: 'flex-end' }}>
+              <button
+                type="button"
+                disabled={!eventId || !staffId}
+                onClick={() => act(`/organizer/events/${eventId}/staff`, { method: 'POST', body: JSON.stringify({ staffId }) }, 'Event staff assigned with ticket scanner permissions.')}
+                style={{ height: '38px', padding: '0 20px', background: '#2563eb', color: '#fff', border: 0, borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}
+              >
+                Assign Staff to Event
+              </button>
+            </div>
+          </div>
+
+          <div className="organizer-table">
+            <h3 style={{ margin: '18px 0 8px', fontSize: '14px', color: '#1e293b' }}>Active Staff Assigned to Selected Event</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Staff Member</th>
+                  <th>Assigned Permissions</th>
+                  <th>Assigned Date</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignedStaff.map(assignment => (
+                  <tr key={assignment._id}>
+                    <td>
+                      <b>{assignment.staff?.name || 'Staff Member'}</b>
+                      <small>{assignment.staff?.email}</small>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: '11px', color: '#475569' }}>
+                        {assignment.permissions?.map(p => p.replaceAll('_', ' ')).join(', ') || 'Ticket check-in, attendance view'}
+                      </span>
+                    </td>
+                    <td>{date(assignment.createdAt)}</td>
+                    <td><span className="workflow-status status-published">Active</span></td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => act(`/organizer/events/${eventId}/staff/${assignment.staff?._id || assignment.staff}`, { method: 'DELETE' }, 'Staff assignment revoked.')}
+                        style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!assignedStaff.length && <Empty text="No staff members assigned to this event yet. Select an event staff member above to assign them." />}
+          </div>
+        </section>
+      )}
       {tab === 'refunds' && <section className="organizer-panel"><header><div><h2>Cancellations & refunds</h2><p>Review customer requests according to your event policy.</p></div></header><div className="refund-list">{bookings.filter(item => item.refundStatus !== 'none').map(item => <article key={item._id}><div><b>{item.bookingReference} · {item.customer?.name}</b><p>{item.refundReason || item.refundFeedback || 'Refund processed'}</p><small>{item.event?.title} · {money(item.totalMinor)}</small></div><Status value={item.refundStatus}/>{item.refundStatus === 'requested' && <div><button onClick={() => act(`/organizer/bookings/${item._id}/refund`, { method:'POST', body:JSON.stringify({ decision:'approved' }) }, 'Refund approved and processed.')}>Approve</button><button className="danger" onClick={() => act(`/organizer/bookings/${item._id}/refund`, { method:'POST', body:JSON.stringify({ decision:'rejected' }) }, 'Refund rejected.')}>Reject</button></div>}</article>)}{!bookings.some(item => item.refundStatus !== 'none') && <Empty text="No cancellation or refund requests."/>}</div></section>}
       {tab === 'reports' && <><section className="organizer-stats">{stats.map(([Icon,name,value]) => <article key={name}><i><Icon/></i><span><small>{name}</small><b>{value}</b></span></article>)}</section><section className="organizer-panel settlement"><h2>Revenue & settlement</h2><p><span>Gross sales</span><b>{money(report.grossMinor)}</b></p><p><span>Platform commission (10%)</span><b>- {money(report.commissionMinor)}</b></p><p><span>Refunds</span><b>- {money(report.refundedMinor)}</b></p><p className="net"><span>Net payable</span><b>{money(report.netMinor)}</b></p><button onClick={downloadCsv}><Download/> Download settlement report</button></section></>}
     </>}

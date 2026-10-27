@@ -57,8 +57,42 @@ router.post('/bookings/:id/refund-request', validate(z.object({ body: z.object({
   } catch (e) { next(e); }
 });
 
-router.post('/venue-reservations', validate(z.object({ body: z.object({ venueId: z.string().regex(/^[a-f\d]{24}$/i), startsAt: z.string().datetime(), endsAt: z.string().datetime(), purpose: z.string().trim().min(3).max(300) }) })), async (req, res, next) => { try { res.status(201).json({ reservation: await createVenueReservation({ customerId: req.user.id, ...req.body }) }); } catch (e) { next(e); } });
-router.get('/venue-reservations/me', async (req, res, next) => { try { res.json({ items: await VenueReservation.find({ customer: req.user.id }).populate('venue', 'name location images').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
+router.post('/venue-reservations', validate(z.object({
+  body: z.object({
+    venueId: z.string().regex(/^[a-f\d]{24}$/i),
+    startsAt: z.string().datetime(),
+    endsAt: z.string().datetime(),
+    purpose: z.string().trim().min(3).max(300),
+    customerNotes: z.string().trim().max(1000).optional(),
+  })
+})), async (req, res, next) => {
+  try {
+    res.status(201).json({ reservation: await createVenueReservation({ customerId: req.user.id, ...req.body }) });
+  } catch (e) { next(e); }
+});
+
+router.get('/venue-reservations/me', async (req, res, next) => {
+  try {
+    res.json({
+      items: await VenueReservation.find({ customer: req.user.id })
+        .populate('venue', 'name location images priceMinorPerHour contactEmail contactPhone')
+        .sort({ createdAt: -1 })
+    });
+  } catch (e) { next(e); }
+});
+
+router.patch('/venue-reservations/:id/cancel', async (req, res, next) => {
+  try {
+    const reservation = await VenueReservation.findOne({ _id: req.params.id, customer: req.user.id });
+    if (!reservation) throw notFound('Venue reservation not found');
+    if (['cancelled', 'rejected'].includes(reservation.status)) {
+      throw new AppError(409, 'ALREADY_CANCELLED', 'Reservation is already cancelled');
+    }
+    reservation.status = 'cancelled';
+    await reservation.save();
+    res.json({ reservation });
+  } catch (e) { next(e); }
+});
 
 router.get('/wishlist', async (req, res, next) => { try { res.json({ items: await Wishlist.find({ user: req.user.id }).populate('item') }); } catch (e) { next(e); } });
 router.post('/wishlist', validate(z.object({ body: z.object({ itemType: z.enum(['event', 'venue']), itemId: z.string().regex(/^[a-f\d]{24}$/i) }) })), async (req, res, next) => { try { const itemModel = req.body.itemType === 'event' ? 'Event' : 'Venue'; const item = await Wishlist.findOneAndUpdate({ user: req.user.id, itemType: req.body.itemType, item: req.body.itemId }, { $setOnInsert: { itemModel } }, { upsert: true, new: true }); res.status(201).json({ item }); } catch (e) { next(e); } });
