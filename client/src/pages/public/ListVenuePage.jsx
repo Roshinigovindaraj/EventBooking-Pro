@@ -34,6 +34,9 @@ const types = ["Banquet Halls", "Convention Centers", "Resorts", "Outdoor Spaces
 export default function ListVenuePage() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const isVenueOwner = Boolean(user?.roles?.some(r => ['venue_owner', 'admin', 'super_admin'].includes(r)));
+  const [application, setApplication] = React.useState(null);
+  const [loadingApp, setLoadingApp] = React.useState(false);
   const [step, setStep] = React.useState(0);
   const [notice, setNotice] = React.useState("");
   const [errorNotice, setErrorNotice] = React.useState("");
@@ -55,6 +58,35 @@ export default function ListVenuePage() {
   const [mediaMode, setMediaMode] = React.useState('upload');
   const [uploadingMedia, setUploadingMedia] = React.useState(false);
   const [mediaUpload, setMediaUpload] = React.useState({ status: 'idle', fileName: '', error: '' });
+
+  // Load applicant's existing application if they are not yet a venue owner
+  React.useEffect(() => {
+    if (user && !isVenueOwner) {
+      setLoadingApp(true);
+      apiRequest('/venue-owner/applications/me')
+        .then(res => {
+          const app = res.items?.[0] || null;
+          setApplication(app);
+          if (app?.details && !form.name) {
+            setForm(current => ({
+              ...current,
+              name: app.details.venueName || current.name,
+              type: app.details.type || current.type,
+              city: app.details.city || current.city,
+              address: app.details.address || current.address,
+              capacity: app.details.capacity ? String(app.details.capacity) : current.capacity,
+              amenities: Array.isArray(app.details.amenities) ? app.details.amenities.join(', ') : (app.details.amenities || current.amenities),
+              image: app.details.image || current.image,
+              price: app.details.pricePerHour ? String(app.details.pricePerHour) : current.price,
+              full: app.details.description || current.full,
+              short: app.details.short || current.short || (app.details.description ? app.details.description.slice(0, 160) : '')
+            }));
+          }
+        })
+        .catch(() => null)
+        .finally(() => setLoadingApp(false));
+    }
+  }, [user, isVenueOwner]);
 
   // Restore saved draft from localStorage if present
   React.useEffect(() => {
@@ -177,7 +209,51 @@ export default function ListVenuePage() {
       return setErrorNotice('AUTH_REQUIRED');
     }
 
-    // 3. Persist venue
+    // 3. For Customer accounts: Submit as a Venue Partner Application for Admin review
+    if (!isVenueOwner) {
+      try {
+        const details = {
+          venueName: form.name.trim(),
+          type: form.type,
+          city: form.city.trim(),
+          address: form.address?.trim() || '',
+          capacity: Number(form.capacity),
+          amenities: form.amenities.split(',').map(value => value.trim()).filter(Boolean),
+          image: form.image || '',
+          pricePerHour: Number(form.price),
+          description,
+          submittedAt: new Date().toISOString()
+        };
+        const isUpdating = Boolean(application && application.status === 'pending');
+        const method = isUpdating ? 'PUT' : 'POST';
+        const endpoint = isUpdating ? '/venue-owner/applications/pending' : '/venue-owner/applications';
+        const result = await apiRequest(endpoint, {
+          method,
+          body: JSON.stringify({ details })
+        });
+
+        try { localStorage.removeItem('eventoria_venue_draft'); } catch {}
+
+        setApplication(result.application);
+        setSubmittedVenue({
+          name: form.name.trim(),
+          type: form.type,
+          location: { city: form.city.trim(), address: form.address },
+          capacity: Number(form.capacity),
+          isApplication: true,
+          status: 'pending'
+        });
+        setNotice(isUpdating ? 'Your Venue Owner application details were updated for Admin review.' : 'Venue Owner Partner Application submitted for Admin approval.');
+        window.dispatchEvent(new Event('eventoria:data-changed'));
+      } catch (error) {
+        setErrorNotice(error.message || 'Could not submit partner application.');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    // 4. For Verified Venue Owners: Persist venue directly
     try {
       const result = await apiRequest('/venue-owner/venues', {
         method: 'POST',
@@ -198,11 +274,6 @@ export default function ListVenuePage() {
 
       // Clear local draft cache
       try { localStorage.removeItem('eventoria_venue_draft'); } catch {}
-
-      // Refresh user to instantly update roles with venue_owner
-      if (refreshUser) {
-        await refreshUser().catch(() => null);
-      }
 
       if (submit) {
         await apiRequest(`/venue-owner/venues/${result.venue._id}/submit`, { method: 'POST' });
@@ -269,6 +340,43 @@ export default function ListVenuePage() {
         </div>
       </section>
 
+      {user && !isVenueOwner && application?.status === 'pending' && (
+        <div style={{ maxWidth: 1180, margin: '0 auto 28px', padding: '16px 20px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <AlertCircle size={26} style={{ color: '#d97706', flexShrink: 0 }} />
+            <div>
+              <strong style={{ display: 'block', fontSize: 15, color: '#92400e' }}>Venue Owner Application Under Admin Review</strong>
+              <p style={{ margin: '3px 0 0', fontSize: 13, color: '#b45309' }}>
+                Your partner proposal for <b>{application.details?.venueName || 'your venue'}</b> is awaiting review from Platform Admins. Once approved, you will gain full Venue Owner access.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              if (refreshUser) await refreshUser().catch(() => null);
+              const res = await apiRequest('/venue-owner/applications/me').catch(() => null);
+              if (res?.items?.[0]) setApplication(res.items[0]);
+            }}
+            style={{ padding: '8px 14px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            Check Status
+          </button>
+        </div>
+      )}
+
+      {user && !isVenueOwner && !application && (
+        <div style={{ maxWidth: 1180, margin: '0 auto 28px', padding: '14px 20px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 14 }}>
+          <ShieldCheck size={24} style={{ color: '#2563eb', flexShrink: 0 }} />
+          <div>
+            <strong style={{ display: 'block', fontSize: 14, color: '#1e40af' }}>Venue Partner Program</strong>
+            <p style={{ margin: '2px 0 0', fontSize: 13, color: '#1d4ed8' }}>
+              Logged in as <b>Customer</b>. Submitting this form forwards your venue proposal to Platform Administrators as a <b>Partner Application</b>. Once approved by an Admin, your account is upgraded to <b>Venue Owner</b> with access to manage bookings and direct <b>Venue Staff</b>.
+            </p>
+          </div>
+        </div>
+      )}
+
       <section className="org-builder lv-builder">
         <aside>
           {formSteps.map(([title,text,Icon],index)=>(
@@ -287,20 +395,37 @@ export default function ListVenuePage() {
             <div className="venue-success-icon">
               <CheckCircle2 size={44} />
             </div>
-            <h2>Venue Submitted for Verification!</h2>
+            <h2>{submittedVenue.isApplication ? 'Venue Partner Application Submitted!' : 'Venue Submitted for Verification!'}</h2>
             <p>
-              Your venue <strong>{submittedVenue.name || form.name}</strong> has been successfully submitted and forwarded to the Admin workspace. Once verified by our team, it will appear publicly for event organizers.
+              {submittedVenue.isApplication ? (
+                <>Your application to become a verified <strong>Venue Owner</strong> for <strong>{submittedVenue.name || form.name}</strong> has been submitted to Platform Administrators. Once approved by an Admin, your account will be granted the <strong>Venue Owner</strong> role to manage bookings and dispatch <strong>Venue Staff</strong>.</>
+              ) : (
+                <>Your venue <strong>{submittedVenue.name || form.name}</strong> has been successfully submitted and forwarded to the Admin workspace. Once verified by our team, it will appear publicly for event organizers.</>
+              )}
             </p>
             <div className="venue-success-meta">
               <div><span>City</span><b>{submittedVenue.location?.city || form.city}</b></div>
               <div><span>Capacity</span><b>{submittedVenue.capacity || form.capacity} Guests</b></div>
               <div><span>Hourly Rate</span><b>₹{form.price} / hr</b></div>
-              <div><span>Status</span><b style={{ color: '#b26a00' }}>Pending Review</b></div>
+              <div><span>Status</span><b style={{ color: '#b26a00' }}>Pending Admin Review</b></div>
             </div>
             <div className="venue-success-actions">
-              <Link to="/portal/venue-owner" className="btn-success-primary">
-                <Building2 size={16} /> Go to Venue Owner Portal
-              </Link>
+              {isVenueOwner ? (
+                <Link to="/portal/venue-owner" className="btn-success-primary">
+                  <Building2 size={16} /> Go to Venue Owner Portal
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-success-primary"
+                  onClick={async () => {
+                    if (refreshUser) await refreshUser().catch(() => null);
+                    navigate('/dashboard');
+                  }}
+                >
+                  <Building2 size={16} /> Go to Dashboard
+                </button>
+              )}
               <Link to="/venues" className="btn-success-secondary">
                 Browse Venues
               </Link>
@@ -309,13 +434,12 @@ export default function ListVenuePage() {
                 onClick={() => {
                   setSubmittedVenue(null);
                   setStep(0);
-                  setForm({ name: "", type: "", short: "", full: "", city: "", address: "", capacity: "300", amenities: "Parking, Wi-Fi", image: "", price: "25000" });
                   setNotice("");
                   setErrorNotice("");
                 }}
                 className="btn-success-text"
               >
-                List Another Venue
+                {submittedVenue.isApplication ? 'Edit Submitted Details' : 'List Another Venue'}
               </button>
             </div>
           </div>
@@ -485,7 +609,7 @@ export default function ListVenuePage() {
 
             <div className="org-form-actions">
               <button type="button" className="draft" disabled={saving} onClick={() => saveVenue(false)}>
-                {saving ? 'Saving…' : 'Save as Draft'}
+                {saving ? 'Saving…' : isVenueOwner ? 'Save as Draft' : 'Save Proposal Draft'}
               </button>
               <button
                 disabled={saving}
@@ -494,19 +618,25 @@ export default function ListVenuePage() {
                   if (step < 5) handleNextStep();
                 }}
               >
-                {saving ? 'Submitting…' : step === 5 ? 'Submit Venue' : 'Next Step'} <ArrowRight />
+                {saving
+                  ? 'Submitting…'
+                  : step === 5
+                  ? (isVenueOwner ? 'Submit Venue' : 'Submit Partner Application')
+                  : 'Next Step'} <ArrowRight />
               </button>
             </div>
 
             {notice && (
               <div className="org-saved">
                 <Check /> {notice}
-                <Link
-                  to="/portal/venue-owner"
-                  style={{ marginLeft: 14, textDecoration: 'underline', fontWeight: 700, color: '#097948' }}
-                >
-                  Open Venue Owner Portal &rarr;
-                </Link>
+                {isVenueOwner && (
+                  <Link
+                    to="/portal/venue-owner"
+                    style={{ marginLeft: 14, textDecoration: 'underline', fontWeight: 700, color: '#097948' }}
+                  >
+                    Open Venue Owner Portal &rarr;
+                  </Link>
+                )}
               </div>
             )}
             {errorNotice && errorNotice !== 'AUTH_REQUIRED' && (

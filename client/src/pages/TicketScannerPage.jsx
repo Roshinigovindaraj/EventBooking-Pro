@@ -106,7 +106,7 @@ export default function TicketScannerPage() {
     }
   };
 
-  const allowEntry = async (targetTicketId = null, checkAll = false) => {
+  const allowEntry = async (targetTicketId = null, checkAll = false, count = 1) => {
     setAdmitting(true);
     setError('');
     try {
@@ -118,26 +118,39 @@ export default function TicketScannerPage() {
           credential: credential.trim(),
           ticketId: ticketIdToCheckIn,
           checkInAll: checkAll,
+          checkInCount: count,
         }),
       });
 
       setTicketData(current => {
         if (!current) return current;
-        const nowIso = result.ticket?.checkedInAt || new Date().toISOString();
-        const updatedAll = current.allTickets?.map(t => {
-          if (checkAll || t.id === ticketIdToCheckIn) {
-            return { ...t, status: 'checked_in', checkedInAt: nowIso };
-          }
-          return t;
-        }) || [];
-
-        const isCurrentTicket = checkAll || !ticketIdToCheckIn || ticketIdToCheckIn === current.ticket?.id;
+        const resTicket = result.ticket || {};
+        const nowIso = resTicket.checkedInAt || new Date().toISOString();
+        const finalAdmit = resTicket.admitCount || current.admitCount || 1;
+        const finalChecked = resTicket.checkedInCount ?? (current.checkedInCount + count);
+        const finalRemaining = resTicket.remainingToAdmit ?? Math.max(0, finalAdmit - finalChecked);
+        const finalStatus = resTicket.status || (finalRemaining === 0 ? 'checked_in' : 'partially_checked_in');
 
         return {
           ...current,
-          status: isCurrentTicket ? 'checked_in' : current.status,
-          checkedInAt: isCurrentTicket ? nowIso : current.checkedInAt,
-          allTickets: updatedAll,
+          status: finalStatus,
+          checkedInAt: nowIso,
+          admitCount: finalAdmit,
+          checkedInCount: finalChecked,
+          remainingToAdmit: finalRemaining,
+          checkIns: resTicket.checkIns || [
+            ...(current.checkIns || []),
+            { attendeeIndex: finalChecked, checkedInAt: nowIso, count: 1 }
+          ],
+          ticket: {
+            ...current.ticket,
+            status: finalStatus,
+            checkedInCount: finalChecked,
+            remainingToAdmit: finalRemaining,
+            checkIns: resTicket.checkIns || current.ticket?.checkIns,
+            checkedInAt: nowIso,
+          },
+          allTickets: result.allTickets || current.allTickets,
         };
       });
     } catch (requestError) {
@@ -147,7 +160,10 @@ export default function TicketScannerPage() {
     }
   };
 
-  const pendingTicketsCount = ticketData?.allTickets?.filter(t => t.status === 'issued')?.length || 0;
+  const admitCount = ticketData?.admitCount || ticketData?.ticket?.admitCount || ticketData?.booking?.quantity || 1;
+  const checkedInCount = ticketData?.checkedInCount ?? ticketData?.ticket?.checkedInCount ?? (ticketData?.status === 'checked_in' ? admitCount : 0);
+  const remainingToAdmit = ticketData?.remainingToAdmit ?? ticketData?.ticket?.remainingToAdmit ?? Math.max(0, admitCount - checkedInCount);
+  const isGroupTicket = admitCount > 1;
 
   return (
     <main className="ticket-scanner-page">
@@ -176,7 +192,7 @@ export default function TicketScannerPage() {
             </button>
           </div>
           <div className="scanner-hints">
-            <span>💡 <b>Accepts:</b> Booking IDs (e.g. <code>EVT-73453260FC</code> or <code>BOOKING EVT-73453260FC</code>), Ticket Codes (<code>TKT-41D4...</code>), or QR scans.</span>
+            <span>💡 <b>Accepts:</b> Booking IDs (e.g. <code>EVT-73453260FC</code>), Ticket Codes (<code>TKT-41D4...</code>), or QR scans. Group tickets allow members to enter separately at different times.</span>
           </div>
         </form>
 
@@ -205,15 +221,46 @@ export default function TicketScannerPage() {
           <div className="ticket-result">
             {ticketData.valid ? (
               <div className="valid-ticket">
-                <div className={`status-badge ${ticketData.status === 'checked_in' ? 'warning' : 'success'}`}>
+                <div className={`status-badge ${remainingToAdmit === 0 ? 'warning' : isGroupTicket && checkedInCount > 0 ? 'partial' : 'success'}`} style={{
+                  background: remainingToAdmit === 0 ? '#fef3c7' : isGroupTicket && checkedInCount > 0 ? '#ede9fe' : '#ecfdf5',
+                  color: remainingToAdmit === 0 ? '#92400e' : isGroupTicket && checkedInCount > 0 ? '#5b21b6' : '#065f46',
+                  borderColor: remainingToAdmit === 0 ? '#fde68a' : isGroupTicket && checkedInCount > 0 ? '#ddd6fe' : '#a7f3d0'
+                }}>
                   <CheckCircle />
-                  {ticketData.status === 'checked_in' ? 'Already Checked In' : 'Valid Ticket — Ready for Entry'}
+                  {remainingToAdmit === 0
+                    ? `All ${admitCount} Attendees Already Checked In (Fully Used)`
+                    : isGroupTicket && checkedInCount > 0
+                    ? `Partially Checked In — ${checkedInCount} of ${admitCount} Admitted (${remainingToAdmit} Remaining)`
+                    : isGroupTicket
+                    ? `Valid Group Ticket — Admit ${admitCount} Members (${admitCount} Remaining)`
+                    : 'Valid Single Ticket — Ready for Entry'}
                 </div>
+
+                {isGroupTicket && (
+                  <div style={{ margin: '14px 0 18px', padding: '14px 18px', background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <b style={{ color: '#1e293b', fontSize: 14 }}>
+                        👥 Group Entry Progress: {checkedInCount} of {admitCount} Entered
+                      </b>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: remainingToAdmit === 0 ? '#059669' : '#7c3aed' }}>
+                        {remainingToAdmit === 0 ? '✓ Complete' : `${remainingToAdmit} Remaining`}
+                      </span>
+                    </div>
+                    <div style={{ height: 10, background: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%',
+                        width: `${Math.round((checkedInCount / admitCount) * 100)}%`,
+                        background: remainingToAdmit === 0 ? '#10b981' : '#8b5cf6',
+                        transition: 'width 0.4s ease'
+                      }} />
+                    </div>
+                  </div>
+                )}
 
                 <div className="ticket-details">
                   <div className="detail-section">
                     <h3><User /> Customer Details</h3>
-                    <p><strong>Name:</strong> {ticketData.customer?.name || 'Guest'}</p>
+                    <p><strong>Primary Booker:</strong> {ticketData.customer?.name || 'Guest'}</p>
                     {ticketData.customer?.email && <p><strong>Email:</strong> {ticketData.customer.email}</p>}
                     {ticketData.customer?.phone && <p><strong>Phone:</strong> {ticketData.customer.phone}</p>}
                   </div>
@@ -222,97 +269,125 @@ export default function TicketScannerPage() {
                     <h3><TicketIcon /> Ticket Information</h3>
                     <p><strong>Ticket Code:</strong> {ticketData.ticket?.code}</p>
                     <p><strong>Ticket Type:</strong> {ticketData.ticket?.ticketType}</p>
-                    <p><strong>Booking Reference:</strong> {ticketData.booking?.reference}</p>
-                    <p><strong>Quantity:</strong> {ticketData.booking?.quantity}</p>
+                    <p><strong>Booking ID:</strong> {ticketData.booking?.reference}</p>
+                    <p><strong>Total Party Size:</strong> <span style={{ fontWeight: 800, color: '#6d28d9' }}>{admitCount} {admitCount === 1 ? 'Attendee' : 'Attendees (Single Ticket)'}</span></p>
+                    <p><strong>Already Admitted:</strong> {checkedInCount} attendee(s)</p>
+                    <p><strong>Remaining to Enter:</strong> <b style={{ color: remainingToAdmit > 0 ? '#b45309' : '#059669' }}>{remainingToAdmit} attendee(s)</b></p>
                   </div>
 
                   <div className="detail-section">
                     <h3><Calendar /> Event Details</h3>
                     <p><strong>Event:</strong> {ticketData.event?.title}</p>
                     <p><strong>Venue:</strong> {ticketData.event?.venue}</p>
-                    <p><strong>Location:</strong> {ticketData.event?.location?.city || ticketData.event?.location?.address || JSON.stringify(ticketData.event?.location || '')}</p>
-                    <p><strong>Starts:</strong> {new Date(ticketData.event?.startsAt).toLocaleString()}</p>
-                    <p><strong>Ends:</strong> {new Date(ticketData.event?.endsAt).toLocaleString()}</p>
+                    <p><strong>City / Address:</strong> {ticketData.event?.location?.city || ticketData.event?.location?.address || 'Venue'}</p>
+                    <p><strong>Starts:</strong> {new Date(ticketData.event?.startsAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                    {ticketData.event?.totalCapacity > 0 && (
+                      <p><strong>Event Capacity:</strong> {ticketData.event.totalCapacity} seats ({ticketData.event.remainingTickets} remaining)</p>
+                    )}
                   </div>
 
-                  {ticketData.allTickets && ticketData.allTickets.length > 1 && (
-                    <div className="attendee-tickets-section">
-                      <h3><Users style={{ width: 18, height: 18, color: '#762796', display: 'inline', verticalAlign: 'middle', marginRight: 6 }} /> Group Booking Tickets ({ticketData.allTickets.length} Attendees)</h3>
-                      <p style={{ margin: '4px 0 10px', fontSize: 13, color: '#687488' }}>
-                        This booking contains {ticketData.allTickets.length} tickets. Check in individual attendees as they arrive or admit the entire party at once.
-                      </p>
-                      <div className="attendee-tickets-grid">
-                        {ticketData.allTickets.map((t) => (
-                          <div key={t.id} className={`attendee-ticket-card ${t.isCurrent ? 'current' : ''}`}>
-                            <header>
-                              <b>Attendee #{t.attendeeNumber}</b>
-                              <span className={`workflow-status status-${t.status}`}>
-                                {t.status === 'checked_in' ? 'Checked In' : 'Issued'}
-                              </span>
-                            </header>
-                            <code>{t.code}</code>
-                            {t.status === 'checked_in' ? (
-                              <span className="checked-tag"><CheckCircle style={{ width: 14, height: 14 }} /> Checked in</span>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={admitting}
-                                className="checkin-btn"
-                                onClick={() => allowEntry(t.id, false)}
-                              >
-                                <CheckCircle style={{ width: 14, height: 14 }} /> Check In Attendee #{t.attendeeNumber}
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                  {/* Arrival History Timeline */}
+                  {((ticketData.checkIns && ticketData.checkIns.length > 0) || isGroupTicket) && (
+                    <div style={{ gridColumn: '1 / -1', marginTop: 12, padding: '16px 20px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10 }}>
+                      <h4 style={{ margin: '0 0 10px', fontSize: 14, color: '#334155', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Clock size={16} style={{ color: '#7c3aed' }} /> Entry &amp; Arrival History ({checkedInCount} of {admitCount} Logged)
+                      </h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                        {Array.from({ length: admitCount }).map((_, idx) => {
+                          const log = ticketData.checkIns?.[idx];
+                          const isEntered = idx < checkedInCount;
+                          return (
+                            <div key={idx} style={{
+                              padding: '10px 12px',
+                              borderRadius: 8,
+                              border: `1px solid ${isEntered ? '#a7f3d0' : '#e2e8f0'}`,
+                              background: isEntered ? '#f0fdf4' : '#f8fafc',
+                              fontSize: 13
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <b>Attendee #{idx + 1}</b>
+                                <span style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  background: isEntered ? '#dcfce7' : '#f1f5f9',
+                                  color: isEntered ? '#15803d' : '#64748b'
+                                }}>
+                                  {isEntered ? 'Checked In' : 'Pending'}
+                                </span>
+                              </div>
+                              <p style={{ margin: '4px 0 0', fontSize: 12, color: isEntered ? '#166534' : '#94a3b8' }}>
+                                {isEntered ? (
+                                  log?.checkedInAt
+                                    ? `Entered: ${new Date(log.checkedInAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                                    : 'Entered previously'
+                                ) : (
+                                  'Can enter separately when they arrive'
+                                )}
+                              </p>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
 
-                  {ticketData.status === 'checked_in' && (
-                    <div className="checked-in-info">
-                      <p><strong>Checked In At:</strong> {new Date(ticketData.checkedInAt).toLocaleString()}</p>
-                    </div>
-                  )}
-
-                  {ticketData.status === 'issued' && (
-                    <div className="gate-decision">
-                      <p>
-                        <strong>Identity and event verified?</strong>
+                  {remainingToAdmit > 0 && (
+                    <div className="gate-decision" style={{ gridColumn: '1 / -1', marginTop: 14, background: '#fdf4ff', border: '1px solid #f0abfc', padding: 20, borderRadius: 12 }}>
+                      <p style={{ margin: '0 0 12px', color: '#701a75' }}>
+                        <strong>Allow Gate Entry for Arriving Attendee(s)</strong>
                         <br />
-                        Only allow entry after matching the attendee and event details above.
+                        {isGroupTicket ? (
+                          <span>This ticket has <b>{remainingToAdmit} remaining attendee(s)</b>. Click below to check in the person arriving right now:</span>
+                        ) : (
+                          <span>Verify the attendee identity and grant gate access.</span>
+                        )}
                       </p>
-                      {ticketData.allTickets && ticketData.allTickets.length > 1 && pendingTicketsCount > 1 && (
+
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                         <button
                           type="button"
-                          className="check-all-btn"
                           disabled={admitting}
-                          onClick={() => allowEntry(null, true)}
+                          onClick={() => allowEntry(ticketData.ticket?.id, false, 1)}
+                          style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
                         >
-                          <Users style={{ width: 18 }} /> {admitting ? 'Checking in party…' : `Check In All (${pendingTicketsCount} Attendees)`}
+                          <CheckCircle size={18} />
+                          {admitting ? 'Checking In…' : isGroupTicket ? `Check In Attendee #${checkedInCount + 1} (Arriving Now)` : 'Allow Entry & Check In'}
                         </button>
-                      )}
-                      <button disabled={admitting} onClick={() => allowEntry(ticketData.ticket?.id, false)}>
-                        <CheckCircle /> {admitting ? 'Checking in…' : 'Allow Entry & Check In'}
-                      </button>
-                      <button
-                        className="deny"
-                        onClick={() => {
-                          setTicketData(null);
-                          setCredential('');
-                        }}
-                      >
-                        <XCircle /> Deny / Scan Next
-                      </button>
+
+                        {isGroupTicket && remainingToAdmit > 1 && (
+                          <button
+                            type="button"
+                            disabled={admitting}
+                            onClick={() => allowEntry(ticketData.ticket?.id, true)}
+                            style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '12px 18px', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                          >
+                            <Users size={18} />
+                            {admitting ? 'Checking In…' : `Admit All Remaining (${remainingToAdmit} Attendees Together)`}
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          className="deny"
+                          onClick={() => {
+                            setTicketData(null);
+                            setCredential('');
+                          }}
+                        >
+                          <XCircle /> Clear / Scan Next
+                        </button>
+                      </div>
                     </div>
                   )}
 
-                  {ticketData.status === 'checked_in' && (
-                    <div className="entry-approved">
+                  {remainingToAdmit === 0 && (
+                    <div className="entry-approved" style={{ gridColumn: '1 / -1', marginTop: 14 }}>
                       <CheckCircle />
                       <div>
-                        <b>Entry approved</b>
-                        <span>This ticket is checked in and marked as used.</span>
+                        <b>All {admitCount} Attendees Admitted</b>
+                        <span>Every member of this group booking has checked in. This ticket is now fully completed.</span>
                       </div>
                     </div>
                   )}

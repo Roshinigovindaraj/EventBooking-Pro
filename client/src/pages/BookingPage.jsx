@@ -175,17 +175,116 @@ export default function BookingPage() {
 
     {step < 3 && <div className="booking-layout"><section className="booking-panel">
       <article className="booking-event"><img src={event.image} alt={event.title}/><div><span>{event.type}</span><h2>{event.title}</h2><p><CalendarDays/> {dateLabel} · {event.time}</p><p><MapPin/> {event.venue}, {event.city}</p></div></article>
-      {step === 1 ? <div className="booking-options"><h2>Select Booking Options</h2><label>Ticket type<select value={ticketType} onChange={(e) => setTicketType(e.target.value)}><option>General Admission</option><option>Premium</option><option>VIP</option></select></label><div className="ticket-quantity"><span><b>Number of tickets</b><small>Tickets are reserved during checkout</small></span><div><button onClick={() => setQuantity(Math.max(1, quantity - 1))}><Minus/></button><b>{quantity}</b><button onClick={() => setQuantity(Math.min(10, quantity + 1))}><Plus/></button></div></div><div className="booking-lock"><ShieldCheck/> Your selected tickets will be securely reserved.</div><button className="booking-primary" onClick={() => setStep(2)}>Continue to Checkout <ArrowRight/></button></div>
-      : <div className="booking-options"><h2>Select Payment Method</h2><div className="payment-methods">{paymentMethods.map(([name, Icon]) => <button className={payment === name ? "active" : ""} onClick={() => setPayment(name)} key={name}><Icon/><span>{name}</span></button>)}</div><div className="payment-note"><ShieldCheck/><span><b>Secured by Razorpay</b><small>Payment is verified securely before your booking is confirmed.</small></span></div>{paymentError&&<div className="payment-error">{paymentError}</div>}<div className="checkout-actions"><button onClick={() => setStep(1)}>Back</button><button className="booking-primary" disabled={processing} onClick={pay}>{processing ? "Opening Razorpay…" : `Pay ${money(total)} Securely`} <ArrowRight/></button></div></div>}
+      {step === 1 ? (
+        <div className="booking-options">
+          <h2>Select Booking Options</h2>
+          <label>
+            Ticket type
+            <select value={ticketType} onChange={(e) => setTicketType(e.target.value)}>
+              {event.ticketTypes?.length > 0 ? (
+                event.ticketTypes.map(t => {
+                  const rem = t.remaining !== undefined ? t.remaining : Math.max(0, (t.capacity || 0) - (t.sold || 0));
+                  return (
+                    <option key={t.name} value={t.name} disabled={rem === 0}>
+                      {t.name} — ₹{(t.priceMinor || 0) / 100} ({rem} left of {t.capacity})
+                    </option>
+                  );
+                })
+              ) : (
+                <>
+                  <option>General Admission</option>
+                  <option>Premium</option>
+                  <option>VIP</option>
+                </>
+              )}
+            </select>
+          </label>
+          {(() => {
+            const tierRem = selectedTicket?.remaining !== undefined
+              ? selectedTicket.remaining
+              : (selectedTicket ? Math.max(0, (selectedTicket.capacity || 0) - (selectedTicket.sold || 0)) : (event.remainingTickets || 100));
+            const maxAllowed = Math.min(10, Math.max(1, tierRem));
+            return (
+              <div className="ticket-quantity">
+                <span>
+                  <b>Number of tickets ({quantity} members)</b>
+                  <small style={{ color: tierRem < 20 ? '#c2410c' : '#047857', fontWeight: 600 }}>
+                    {tierRem <= 0
+                      ? '❌ Sold out for this tier'
+                      : `🎟️ ${tierRem} remaining (Event Capacity: ${selectedTicket?.capacity || event.totalCapacity || event.capacity || 100})`}
+                  </small>
+                </span>
+                <div>
+                  <button type="button" onClick={() => setQuantity(Math.max(1, quantity - 1))}><Minus/></button>
+                  <b>{quantity}</b>
+                  <button type="button" disabled={quantity >= maxAllowed} onClick={() => setQuantity(Math.min(maxAllowed, quantity + 1))}><Plus/></button>
+                </div>
+              </div>
+            );
+          })()}
+          <div className="booking-lock">
+            <ShieldCheck/> Your selected tickets will be securely reserved as a single master ticket for your party.
+          </div>
+          <button className="booking-primary" onClick={() => setStep(2)}>
+            Continue to Checkout <ArrowRight/>
+          </button>
+        </div>
+      ) : (
+        <div className="booking-options">
+          <h2>Select Payment Method</h2>
+          <div className="payment-methods">
+            {paymentMethods.map(([name, Icon]) => (
+              <button className={payment === name ? "active" : ""} onClick={() => setPayment(name)} key={name}>
+                <Icon/><span>{name}</span>
+              </button>
+            ))}
+          </div>
+          <div className="payment-note">
+            <ShieldCheck/>
+            <span><b>Secured by Razorpay</b><small>Payment is verified securely before your booking is confirmed.</small></span>
+          </div>
+          {paymentError && <div className="payment-error">{paymentError}</div>}
+          <div className="checkout-actions">
+            <button onClick={() => setStep(1)}>Back</button>
+            <button className="booking-primary" disabled={processing} onClick={pay}>
+              {processing ? "Opening Razorpay…" : `Pay ${money(total)} Securely`} <ArrowRight/>
+            </button>
+          </div>
+        </div>
+      )}
     </section><aside className="price-panel"><h2>Price Breakdown</h2><dl><div><dt>{ticketType} × {quantity}</dt><dd>{money(subtotal)}</dd></div><div><dt>Taxes & fees</dt><dd>{money(fees)}</dd></div>{couponApplied&&<div className="discount"><dt>Coupon discount</dt><dd>− {money(discount)}</dd></div>}<div className="total"><dt>Total Amount</dt><dd>{money(total)}</dd></div></dl><label>Apply coupon code<div><input value={coupon} onChange={(e) => setCoupon(e.target.value)} placeholder="Enter coupon"/><button onClick={applyCoupon}>Apply</button></div></label>{couponApplied&&<p className="coupon-success"><Check/> EVENT10 applied</p>}{couponError&&<p className="coupon-error">{couponError}</p>}</aside></div>}
 
     {step === 3 && booking && <section className="booking-success">
       <div className="success-mark"><Check/></div><p>PAYMENT SUCCESSFUL</p><h2>Booking Confirmed!</h2><span>A confirmation has been created for your Eventoria account.</span>
       <article className="ticket-card ticket-voucher">
-        <header><Ticket/><b>E-Ticket / Booking Voucher</b></header>
+        <header><Ticket/><b>E-Ticket / Booking Voucher {booking.quantity > 1 ? `(Master Pass: ${booking.quantity} Members)` : ''}</b></header>
         <div className="ticket-event"><img src={booking.image} alt=""/><div><b>{booking.title}</b><small>{booking.date} · {booking.time}</small><small>{booking.venue}, {booking.city}</small></div></div>
-        <div className="ticket-qr">{qrCodeUrl ? <img src={qrCodeUrl} alt={`QR code for ticket ${booking.id}-P01`}/> : <span>Generating QR code…</span>}</div>
-        <dl><div><dt>Booking ID</dt><dd>{booking.id}</dd></div><div><dt>Name</dt><dd>{booking.customerName || user.name}</dd></div><div><dt>Ticket Type</dt><dd>{booking.ticketType}</dd></div><div><dt>Quantity</dt><dd>{booking.quantity}</dd></div><div><dt>Seat / Entry</dt><dd>{booking.ticketType === "General Admission" ? "GA - Standing" : booking.ticketType}</dd></div><div><dt>Total Paid</dt><dd>{booking.price}</dd></div></dl>
+        <div className="ticket-qr">{qrCodeUrl ? <img src={qrCodeUrl} alt={`QR code for ticket ${booking.id}`}/> : <span>Generating QR code…</span>}</div>
+        <dl>
+          <div><dt>Booking ID</dt><dd>{booking.id}</dd></div>
+          <div><dt>Primary Guest</dt><dd>{booking.customerName || user.name}</dd></div>
+          <div><dt>Ticket Type</dt><dd>{booking.ticketType}</dd></div>
+          <div><dt>Admit Count</dt><dd><b style={{ color: '#7c3aed' }}>{booking.quantity} {booking.quantity === 1 ? 'Attendee' : 'Attendees (Single Pass)'}</b></dd></div>
+          <div><dt>Seat / Entry</dt><dd>{booking.ticketType === "General Admission" ? "GA - Standing" : booking.ticketType}</dd></div>
+          <div><dt>Total Paid</dt><dd>{booking.price}</dd></div>
+        </dl>
+        {booking.quantity > 1 && (
+          <div style={{
+            margin: "12px 18px 0",
+            padding: "10px 14px",
+            background: "#f5f3ff",
+            border: "1px solid #ddd6fe",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "#6d28d9",
+            textAlign: "left"
+          }}>
+            <b>👥 Group Pass Information:</b>
+            <p style={{ margin: "3px 0 0", color: "#5b21b6", lineHeight: 1.4 }}>
+              This single ticket admits all {booking.quantity} members. Each member can enter together or arrive at different times using this same ticket. Gate staff will log each arrival incrementally.
+            </p>
+          </div>
+        )}
         <footer>
           <button disabled={downloading} onClick={downloadTicket} style={{ minWidth: 120 }}>
             <Download size={16} /> {downloading ? "Preparing PDF…" : "Download"}

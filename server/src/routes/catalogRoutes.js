@@ -43,7 +43,30 @@ router.get('/events', async (req, res, next) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
     const [items, total] = await Promise.all([Event.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(), Event.countDocuments(filter)]);
-    res.json({ items, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+
+    const computedItems = items.map(ev => {
+      const ticketTypes = (ev.ticketTypes || []).map(t => {
+        const capacity = Number(t.capacity) || 0;
+        const sold = Number(t.sold) || 0;
+        const reserved = Number(t.reserved) || 0;
+        const remaining = Math.max(0, capacity - sold - reserved);
+        return { ...t, remaining, isSoldOut: remaining === 0 };
+      });
+      const totalCapacity = ticketTypes.reduce((acc, t) => acc + (Number(t.capacity) || 0), 0);
+      const totalSold = ticketTypes.reduce((acc, t) => acc + (Number(t.sold) || 0), 0);
+      const totalReserved = ticketTypes.reduce((acc, t) => acc + (Number(t.reserved) || 0), 0);
+      const remainingTickets = Math.max(0, totalCapacity - totalSold - totalReserved);
+      return {
+        ...ev,
+        ticketTypes,
+        totalCapacity,
+        totalSold,
+        remainingTickets,
+        isSoldOut: remainingTickets === 0,
+      };
+    });
+
+    res.json({ items: computedItems, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (error) { next(error); }
 });
 
@@ -51,7 +74,29 @@ router.get('/events/:id', async (req, res, next) => {
   try {
     const item = await Event.findOne({ $or: [{ _id: req.params.id.match(/^[a-f\d]{24}$/i) ? req.params.id : null }, { slug: req.params.id }], status: 'published' }).lean();
     if (!item) throw notFound('Event not found');
-    res.json({ item });
+
+    const ticketTypes = (item.ticketTypes || []).map(t => {
+      const capacity = Number(t.capacity) || 0;
+      const sold = Number(t.sold) || 0;
+      const reserved = Number(t.reserved) || 0;
+      const remaining = Math.max(0, capacity - sold - reserved);
+      return { ...t, remaining, isSoldOut: remaining === 0 };
+    });
+    const totalCapacity = ticketTypes.reduce((acc, t) => acc + (Number(t.capacity) || 0), 0);
+    const totalSold = ticketTypes.reduce((acc, t) => acc + (Number(t.sold) || 0), 0);
+    const totalReserved = ticketTypes.reduce((acc, t) => acc + (Number(t.reserved) || 0), 0);
+    const remainingTickets = Math.max(0, totalCapacity - totalSold - totalReserved);
+
+    res.json({
+      item: {
+        ...item,
+        ticketTypes,
+        totalCapacity,
+        totalSold,
+        remainingTickets,
+        isSoldOut: remainingTickets === 0,
+      }
+    });
   } catch (error) { next(error); }
 });
 

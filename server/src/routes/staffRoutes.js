@@ -34,6 +34,21 @@ router.get('/tickets/verify', authorize('event_staff', 'event_organizer', 'admin
     const type = event?.ticketTypes.id(populated.booking?.ticketTypeId);
     const typeName = type?.name || 'General Admission';
 
+    // Compute remaining tickets for event and selected ticket tier
+    const tierCapacity = type?.capacity || 0;
+    const tierSold = type?.sold || 0;
+    const tierRemaining = Math.max(0, tierCapacity - tierSold);
+    const totalEventCapacity = (event?.ticketTypes || []).reduce((sum, t) => sum + (t.capacity || 0), 0);
+    const totalEventSold = (event?.ticketTypes || []).reduce((sum, t) => sum + (t.sold || 0), 0);
+    const totalEventRemaining = Math.max(0, totalEventCapacity - totalEventSold);
+
+    // Group attendee calculations
+    const isMultiDocGroup = (allBookingTickets || []).length > 1;
+    const admitCount = populated.admitCount || (isMultiDocGroup ? allBookingTickets.length : (populated.booking?.quantity || 1));
+    const legacyCheckedIn = isMultiDocGroup ? allBookingTickets.filter(t => t.status === 'checked_in').length : 0;
+    const checkedInCount = isMultiDocGroup ? legacyCheckedIn : (populated.checkedInCount || (populated.status === 'checked_in' ? admitCount : 0));
+    const remainingToAdmit = Math.max(0, admitCount - checkedInCount);
+
     const formattedAllTickets = (allBookingTickets || []).map((t, idx) => ({
       id: t.id,
       code: t.code,
@@ -45,14 +60,47 @@ router.get('/tickets/verify', authorize('event_staff', 'event_organizer', 'admin
     }));
 
     res.json({
-      valid: !['cancelled', 'refunded'].includes(ticket.status),
-      status: ticket.status,
-      checkedInAt: ticket.checkedInAt,
-      ticket: { id: ticket.id, code: ticket.code, ticketType: typeName, status: ticket.status, checkedInAt: ticket.checkedInAt },
+      valid: !['cancelled', 'refunded'].includes(populated.status),
+      status: populated.status,
+      checkedInAt: populated.checkedInAt,
+      admitCount,
+      checkedInCount,
+      remainingToAdmit,
+      checkIns: populated.checkIns || [],
+      ticket: {
+        id: populated.id,
+        code: populated.code,
+        ticketType: typeName,
+        status: populated.status,
+        checkedInAt: populated.checkedInAt,
+        admitCount,
+        checkedInCount,
+        remainingToAdmit,
+        checkIns: populated.checkIns || [],
+        tierCapacity,
+        tierRemaining,
+        totalEventCapacity,
+        totalEventRemaining,
+      },
       allTickets: formattedAllTickets,
       customer: populated.owner,
-      booking: { reference: populated.booking?.bookingReference, quantity: populated.booking?.quantity, paymentStatus: populated.booking?.paymentStatus },
-      event: { id: event?.id, title: event?.title, venue: event?.venueName, location: event?.location, startsAt: event?.startsAt, endsAt: event?.endsAt },
+      booking: {
+        reference: populated.booking?.bookingReference,
+        quantity: populated.booking?.quantity,
+        paymentStatus: populated.booking?.paymentStatus
+      },
+      event: {
+        id: event?.id,
+        title: event?.title,
+        venue: event?.venueName,
+        location: event?.location,
+        startsAt: event?.startsAt,
+        endsAt: event?.endsAt,
+        totalCapacity: totalEventCapacity,
+        remainingTickets: totalEventRemaining,
+        tierCapacity,
+        tierRemaining
+      },
     });
   } catch (e) { next(e); }
 });
@@ -62,7 +110,9 @@ router.post('/tickets/check-in', authorize('event_staff', 'event_organizer', 'ad
     eventId: z.string().regex(/^[a-f\d]{24}$/i),
     credential: z.string().trim().min(1).max(500).optional(),
     ticketId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+    checkInCount: z.number().int().min(1).max(50).optional(),
     checkInAll: z.boolean().optional(),
+    notes: z.string().max(500).optional(),
   }).refine(data => data.credential || data.ticketId, {
     message: 'Either ticketId or credential must be provided',
   }),
@@ -73,7 +123,7 @@ router.post('/tickets/check-in', authorize('event_staff', 'event_organizer', 'ad
     let allBookingTickets = [];
 
     if (req.body.ticketId) {
-      ticket = await Ticket.findById(req.body.ticketId).select('+credentialHash');
+      ticket = await Ticket.findById(req.body.ticketId).select('+credentialHash').populate('booking');
       if (ticket) {
         allBookingTickets = await Ticket.find({ booking: ticket.booking }).sort({ createdAt: 1 });
       }
@@ -87,17 +137,25 @@ router.post('/tickets/check-in', authorize('event_staff', 'event_organizer', 'ad
     if (String(ticket.event) !== String(req.body.eventId)) {
       throw new AppError(400, 'EVENT_MISMATCH', 'This ticket belongs to a different event');
     }
-
-    if (ticket.status === 'checked_in') {
-      throw new AppError(409, 'TICKET_ALREADY_USED', `Ticket ${ticket.code} has already been checked in`);
-    }
     if (['cancelled', 'refunded'].includes(ticket.status)) {
       throw new AppError(409, 'TICKET_INVALID_STATUS', `Ticket ${ticket.code} is ${ticket.status}`);
     }
 
+    const isMultiDocGroup = allBookingTickets.length > 1;
+    const admitCount = ticket.admitCount || (isMultiDocGroup ? allBookingTickets.length : (ticket.booking?.quantity || 1));
+    const currentCheckedIn = isMultiDocGroup ? allBookingTickets.filter(t => t.status === 'checked_in').length : (ticket.checkedInCount || (ticket.status === 'checked_in' ? admitCount : 0));
+
+    if (ticket.status === 'checked_in' || currentCheckedIn >= admitCount) {
+      throw new AppError(409, 'TICKET_ALREADY_USED', `All ${admitCount} attendees for ticket ${ticket.code} have already checked in`);
+    }
+
+    const remaining = Math.max(0, admitCount - currentCheckedIn);
+    const countToAdmit = req.body.checkInAll ? remaining : Math.min(remaining, req.body.checkInCount || 1);
     const now = new Date();
-    if (req.body.checkInAll && allBookingTickets.length > 0) {
-      const issuedIds = allBookingTickets.filter(t => t.status === 'issued').map(t => t._id);
+
+    if (isMultiDocGroup) {
+      const issuedTickets = allBookingTickets.filter(t => t.status === 'issued').slice(0, countToAdmit);
+      const issuedIds = issuedTickets.map(t => t._id);
       if (issuedIds.length > 0) {
         await Ticket.updateMany(
           { _id: { $in: issuedIds } },
@@ -107,22 +165,73 @@ router.post('/tickets/check-in', authorize('event_staff', 'event_organizer', 'ad
           await AuditLog.create({ actor: req.user.id, action: 'ticket.checked_in', resourceType: 'Ticket', resourceId: tid });
         }
       }
-      ticket.status = 'checked_in';
+      ticket.status = (currentCheckedIn + countToAdmit >= admitCount) ? 'checked_in' : 'partially_checked_in';
       ticket.checkedInAt = now;
       ticket.checkedInBy = req.user.id;
     } else {
-      ticket.status = 'checked_in';
+      const newCheckIns = [];
+      for (let i = 0; i < countToAdmit; i += 1) {
+        const attendeeNumber = currentCheckedIn + i + 1;
+        newCheckIns.push({
+          attendeeIndex: attendeeNumber,
+          checkedInAt: now,
+          checkedInBy: req.user.id,
+          count: 1,
+          notes: req.body.notes || `Attendee #${attendeeNumber} checked in by staff`
+        });
+      }
+      ticket.checkIns = [...(ticket.checkIns || []), ...newCheckIns];
+      ticket.checkedInCount = currentCheckedIn + countToAdmit;
       ticket.checkedInAt = now;
       ticket.checkedInBy = req.user.id;
+      ticket.status = (ticket.checkedInCount >= admitCount) ? 'checked_in' : 'partially_checked_in';
       await ticket.save();
-      await AuditLog.create({ actor: req.user.id, action: 'ticket.checked_in', resourceType: 'Ticket', resourceId: ticket.id });
+
+      await AuditLog.create({
+        actor: req.user.id,
+        action: ticket.status === 'checked_in' ? 'ticket.checked_in' : 'ticket.partially_checked_in',
+        resourceType: 'Ticket',
+        resourceId: ticket.id,
+        metadata: {
+          countAdmitted: countToAdmit,
+          totalAdmitted: ticket.checkedInCount,
+          admitCount,
+          remaining: admitCount - ticket.checkedInCount
+        }
+      });
     }
 
+    const finalCheckedIn = isMultiDocGroup ? (currentCheckedIn + countToAdmit) : ticket.checkedInCount;
+    const finalRemaining = Math.max(0, admitCount - finalCheckedIn);
     const updatedTickets = await Ticket.find({ booking: ticket.booking }).sort({ createdAt: 1 });
+
     res.json({
       result: 'accepted',
-      ticket: { id: ticket.id, code: ticket.code, status: ticket.status, checkedInAt: ticket.checkedInAt },
-      allTickets: updatedTickets.map((t, idx) => ({ id: t.id, code: t.code, status: t.status, checkedInAt: t.checkedInAt, attendeeNumber: idx + 1 })),
+      status: ticket.status,
+      admitCount,
+      checkedInCount: finalCheckedIn,
+      remainingToAdmit: finalRemaining,
+      admittedNow: countToAdmit,
+      ticket: {
+        id: ticket.id,
+        code: ticket.code,
+        status: ticket.status,
+        admitCount,
+        checkedInCount: finalCheckedIn,
+        remainingToAdmit: finalRemaining,
+        checkedInAt: ticket.checkedInAt,
+        checkIns: ticket.checkIns || [],
+      },
+      allTickets: updatedTickets.map((t, idx) => ({
+        id: t.id,
+        code: t.code,
+        status: t.status,
+        checkedInAt: t.checkedInAt,
+        attendeeNumber: idx + 1
+      })),
+      message: ticket.status === 'checked_in'
+        ? `All ${admitCount} attendees for this ticket have now entered.`
+        : `Attendee #${finalCheckedIn} admitted. ${finalRemaining} attendee(s) remaining on this ticket.`
     });
   } catch (e) { next(e); }
 });

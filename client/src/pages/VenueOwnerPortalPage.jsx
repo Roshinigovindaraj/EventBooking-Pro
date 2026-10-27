@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ClipboardList,
   Clock,
   Download,
   ExternalLink,
@@ -17,9 +18,11 @@ import {
   Search,
   Send,
   Sparkles,
+  Trash2,
   Users,
   X,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { apiRequest } from '../services/apiClient.js';
 
@@ -41,9 +44,19 @@ const dateStr = (val) =>
 export default function VenueOwnerPortalPage({ user }) {
   const [tab, setTab] = React.useState('requests');
   const [filterStatus, setFilterStatus] = React.useState('all');
+  const [taskFilterStatus, setTaskFilterStatus] = React.useState('all');
   const [query, setQuery] = React.useState('');
   const [venues, setVenues] = React.useState([]);
   const [reservations, setReservations] = React.useState([]);
+  const [tasks, setTasks] = React.useState([]);
+  const [staffList, setStaffList] = React.useState([]);
+  const [taskForm, setTaskForm] = React.useState({
+    venueId: '',
+    reservationId: '',
+    assigneeId: '',
+    title: '',
+    notes: '',
+  });
   const [busy, setBusy] = React.useState(true);
   const [actionBusy, setActionBusy] = React.useState('');
   const [notice, setNotice] = React.useState('');
@@ -60,12 +73,16 @@ export default function VenueOwnerPortalPage({ user }) {
     setBusy(true);
     setError('');
     try {
-      const [venueRes, reservationRes] = await Promise.all([
+      const [venueRes, reservationRes, taskRes, staffRes] = await Promise.all([
         apiRequest('/venue-owner/venues').catch(() => ({ items: [] })),
         apiRequest('/venue-owner/reservations').catch(() => ({ items: [] })),
+        apiRequest('/venue-owner/tasks').catch(() => ({ items: [] })),
+        apiRequest('/venue-owner/staff').catch(() => ({ items: [] })),
       ]);
       setVenues(venueRes.items || []);
       setReservations(reservationRes.items || []);
+      setTasks(taskRes.items || []);
+      setStaffList(staffRes.items || []);
     } catch (err) {
       setError(err.message || 'Unable to load venue owner records.');
     } finally {
@@ -76,6 +93,67 @@ export default function VenueOwnerPortalPage({ user }) {
   React.useEffect(() => {
     load();
   }, [load]);
+
+  const taskPresets = [
+    { title: 'Hall Cleaning & Seating Arrangement', notes: 'Arrange banquet chairs, table linen, and clear central aisle.' },
+    { title: 'A/V & Stage Lighting Verification', notes: 'Test wireless microphones, stage spotlights, and generator power backup.' },
+    { title: 'Catering & Service Access Verification', notes: 'Open service entry, inspect kitchen water supply and waste disposal.' },
+    { title: 'Air Conditioning & Power Generator Check', notes: 'Pre-cool main hall to 22°C and check diesel generator fuel levels.' },
+    { title: 'Gate Entry & Guest Parking Protocol', notes: 'Coordinate valet parking and display directional signs at main gate.' },
+    { title: 'Post-event Inspection & Handover', notes: 'Check for physical damage, verify vendor checkout, and lock facility.' },
+  ];
+
+  const handleCreateTask = async (e) => {
+    e.preventDefault();
+    if (!taskForm.venueId || !taskForm.assigneeId || !taskForm.title.trim()) {
+      setError('Please select a venue, staff member, and provide a task title.');
+      return;
+    }
+    setActionBusy('create-task');
+    setError('');
+    setNotice('');
+    try {
+      await apiRequest('/venue-owner/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          venueId: taskForm.venueId,
+          reservationId: taskForm.reservationId || undefined,
+          assigneeId: taskForm.assigneeId,
+          title: taskForm.title.trim(),
+          notes: taskForm.notes?.trim() || '',
+        }),
+      });
+      setNotice('Work task assigned to venue staff successfully!');
+      setTaskForm((prev) => ({
+        ...prev,
+        title: '',
+        notes: '',
+        reservationId: '',
+      }));
+      await load();
+      window.dispatchEvent(new Event('eventoria:data-changed'));
+    } catch (err) {
+      setError(err.message || 'Could not assign task.');
+    } finally {
+      setActionBusy('');
+    }
+  };
+
+  const handleDeleteTask = async (taskId) => {
+    setActionBusy(taskId);
+    setError('');
+    setNotice('');
+    try {
+      await apiRequest(`/venue-owner/tasks/${taskId}`, { method: 'DELETE' });
+      setNotice('Task removed.');
+      await load();
+      window.dispatchEvent(new Event('eventoria:data-changed'));
+    } catch (err) {
+      setError(err.message || 'Could not delete task.');
+    } finally {
+      setActionBusy('');
+    }
+  };
 
   const handleConfirmReservation = async (reservation) => {
     setActionBusy(reservation._id);
@@ -239,6 +317,12 @@ export default function VenueOwnerPortalPage({ user }) {
           onClick={() => setTab('venues')}
         >
           My Listed Venues ({venues.length})
+        </button>
+        <button
+          className={tab === 'tasks' ? 'active' : ''}
+          onClick={() => setTab('tasks')}
+        >
+          Venue Staff &amp; Tasks ({tasks.length})
         </button>
       </nav>
 
@@ -474,7 +558,7 @@ export default function VenueOwnerPortalPage({ user }) {
             </div>
           )}
         </section>
-      ) : (
+      ) : tab === 'venues' ? (
         /* My Listed Venues Tab */
         <section className="organizer-panel">
           <header>
@@ -564,6 +648,305 @@ export default function VenueOwnerPortalPage({ user }) {
                   </div>
                 </article>
               ))}
+            </div>
+          )}
+        </section>
+      ) : (
+        <section className="organizer-panel">
+          <header>
+            <div>
+              <h2>Venue Staff Operations &amp; Task Assignments</h2>
+              <p>Assign pre-event preparation, facility readiness, and logistics work to registered venue staff members.</p>
+            </div>
+          </header>
+
+          {/* Form to Assign Work */}
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: 14,
+              padding: '22px 24px',
+              marginBottom: 24,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <ClipboardList size={20} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, color: '#0f172a', fontWeight: 700 }}>Assign Work to Venue Staff</h3>
+                <span style={{ fontSize: 12, color: '#64748b' }}>Select venue, staff member, and give actionable instructions.</span>
+              </div>
+            </div>
+
+            {/* Quick Presets */}
+            <div style={{ marginBottom: 16 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 6 }}>
+                ⚡ Quick Task Presets (Click to Auto-fill):
+              </span>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {taskPresets.map((preset) => (
+                  <button
+                    key={preset.title}
+                    type="button"
+                    onClick={() => setTaskForm((prev) => ({ ...prev, title: preset.title, notes: preset.notes }))}
+                    style={{
+                      background: '#fff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 20,
+                      padding: '5px 12px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: '#334155',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    + {preset.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <form onSubmit={handleCreateTask}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 14 }}>
+                {/* Select Venue */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Target Venue <em>*</em>
+                  </label>
+                  <select
+                    required
+                    value={taskForm.venueId}
+                    onChange={(e) => setTaskForm((prev) => ({ ...prev, venueId: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, background: '#fff' }}
+                  >
+                    <option value="">Select a Venue</option>
+                    {venues.map((v) => (
+                      <option key={v._id} value={v._id}>{v.name} ({v.location?.city || v.city})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Select Staff Member */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Assign To (Venue Staff) <em>*</em>
+                  </label>
+                  <select
+                    required
+                    value={taskForm.assigneeId}
+                    onChange={(e) => setTaskForm((prev) => ({ ...prev, assigneeId: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, background: '#fff' }}
+                  >
+                    <option value="">Select Staff Member</option>
+                    {staffList.map((s) => (
+                      <option key={s._id} value={s._id}>{s.name} · {s.email}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Link to Booking (Optional) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Linked Reservation (Optional)
+                  </label>
+                  <select
+                    value={taskForm.reservationId}
+                    onChange={(e) => setTaskForm((prev) => ({ ...prev, reservationId: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, background: '#fff' }}
+                  >
+                    <option value="">None / General Venue Prep</option>
+                    {reservations.filter((r) => r.status === 'confirmed').map((r) => (
+                      <option key={r._id} value={r._id}>#{r.reference} - {r.purpose}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Task Title */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                  Task Title / Action Item <em>*</em>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Stage lighting check, Hall A seating arrangement"
+                  value={taskForm.title}
+                  onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Notes / Special Instructions */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                  Instructions / Detailed Checklist
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Provide detailed instructions (e.g. Test all 4 cordless mics, verify generator diesel level)..."
+                  value={taskForm.notes}
+                  onChange={(e) => setTaskForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="submit"
+                  disabled={actionBusy === 'create-task' || venues.length === 0 || staffList.length === 0}
+                  style={{
+                    background: '#2563eb',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Send size={15} /> {actionBusy === 'create-task' ? 'Assigning Task…' : 'Assign Work to Venue Staff'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Assigned Tasks Table / Cards */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#0f172a', fontWeight: 700 }}>
+              Assigned Operational Work ({tasks.length})
+            </h3>
+            <div style={{ display: 'inline-flex', background: '#f1f5f9', borderRadius: 8, padding: 3 }}>
+              {[
+                ['all', 'All'],
+                ['todo', 'To Do'],
+                ['in_progress', 'In Progress'],
+                ['completed', 'Completed'],
+                ['blocked', 'Blocked'],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTaskFilterStatus(key)}
+                  style={{
+                    border: 'none',
+                    background: taskFilterStatus === key ? '#ffffff' : 'transparent',
+                    color: taskFilterStatus === key ? '#0f172a' : '#64748b',
+                    padding: '5px 12px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    boxShadow: taskFilterStatus === key ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {tasks.length === 0 ? (
+            <div style={{ background: '#fff', border: '1px dashed #cbd5e1', borderRadius: 12, padding: '36px 20px', textAlign: 'center' }}>
+              <p style={{ color: '#64748b', margin: 0, fontSize: 14 }}>
+                No tasks assigned yet. Use the form above to assign operational tasks to your venue staff, or confirm booking requests to auto-assign readiness checklists!
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {tasks
+                .filter((t) => taskFilterStatus === 'all' || t.status === taskFilterStatus)
+                .map((t) => {
+                  const statusStyles = {
+                    completed: { bg: '#ecfdf5', color: '#065f46', border: '#a7f3d0', label: 'Completed' },
+                    in_progress: { bg: '#fffbeb', color: '#b45309', border: '#fde68a', label: 'In Progress' },
+                    blocked: { bg: '#fef2f2', color: '#991b1b', border: '#fecaca', label: 'Blocked' },
+                    todo: { bg: '#eff6ff', color: '#1e40af', border: '#bfdbfe', label: 'To Do' },
+                  }[t.status] || { bg: '#f8fafc', color: '#475569', border: '#e2e8f0', label: t.status };
+
+                  return (
+                    <div
+                      key={t._id}
+                      style={{
+                        background: '#fff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 10,
+                        padding: '16px 18px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <span
+                              style={{
+                                background: statusStyles.bg,
+                                color: statusStyles.color,
+                                border: `1px solid ${statusStyles.border}`,
+                                padding: '2px 8px',
+                                borderRadius: 99,
+                                fontSize: 11,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {statusStyles.label}
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>
+                              📍 {t.venue?.name || 'Venue'}
+                            </span>
+                          </div>
+                          <h4 style={{ margin: '2px 0 4px', fontSize: 15, color: '#0f172a' }}>{t.title}</h4>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTask(t._id)}
+                          disabled={actionBusy === t._id}
+                          title="Remove task"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#94a3b8',
+                            cursor: 'pointer',
+                            padding: 4,
+                          }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12, color: '#64748b' }}>
+                        <span>
+                          <strong>Assigned Staff:</strong> {t.assignee?.name || 'Staff'} ({t.assignee?.email || 'N/A'})
+                        </span>
+                        {t.reservation && (
+                          <span>
+                            <strong>Reservation:</strong> #{t.reservation.reference} ({t.reservation.purpose})
+                          </span>
+                        )}
+                        {t.completedAt && (
+                          <span style={{ color: '#059669', fontWeight: 600 }}>
+                            ✓ Finished on {new Date(t.completedAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                          </span>
+                        )}
+                      </div>
+
+                      {t.notes && (
+                        <div style={{ fontSize: 12, background: '#f8fafc', padding: '8px 12px', borderRadius: 6, color: '#334155', border: '1px solid #f1f5f9' }}>
+                          <strong>Instructions / Field Remarks:</strong> {t.notes}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           )}
         </section>

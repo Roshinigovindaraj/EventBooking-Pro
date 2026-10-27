@@ -31,12 +31,26 @@ async function finalizeBooking({ bookingId, customerId }) {
       booking.paymentStatus = 'successful';
       await booking.save({ session });
       confirmedBooking = booking;
-      for (let index = 0; index < booking.quantity; index += 1) {
-        const credential = crypto.randomBytes(32).toString('base64url');
-        const code = `TKT-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
-        const [ticket] = await Ticket.create([{ booking: booking.id, event: booking.event, owner: customerId, code, credentialHash: hash(credential), status: 'issued' }], { session });
-        issuedTickets.push({ id: ticket.id, code: ticket.code, credential });
-      }
+      const credential = crypto.randomBytes(32).toString('base64url');
+      const code = `TKT-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+      const [ticket] = await Ticket.create([{
+        booking: booking.id,
+        event: booking.event,
+        owner: customerId,
+        code,
+        credentialHash: hash(credential),
+        admitCount: booking.quantity || 1,
+        checkedInCount: 0,
+        status: 'issued',
+        checkIns: []
+      }], { session });
+      issuedTickets.push({
+        id: ticket.id,
+        code: ticket.code,
+        credential,
+        admitCount: booking.quantity || 1,
+        checkedInCount: 0
+      });
     });
     return { booking: confirmedBooking, tickets: issuedTickets };
   } finally { await session.endSession(); }

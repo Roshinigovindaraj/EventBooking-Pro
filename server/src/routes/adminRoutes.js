@@ -25,6 +25,27 @@ router.post('/admin/applications/:id/review', validate(review), async (req, res,
                     const role = application.type === 'organizer' ? 'event_organizer' : 'venue_owner';
                     const applicantId = application.applicant?._id || application.applicant;
                     await User.updateOne({ _id: applicantId }, { $addToSet: { roles: role } });
+                    if (application.type === 'venue_owner' && application.details?.venueName) {
+                        const d = application.details;
+                        const existing = await Venue.findOne({ owner: applicantId, name: d.venueName });
+                        if (!existing) {
+                            const slug = String(d.venueName).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
+                            await Venue.create({
+                                name: d.venueName,
+                                slug,
+                                description: d.description || 'Premier venue for events and celebrations.',
+                                type: d.type || 'Banquet Halls',
+                                location: { city: d.city || 'Chennai', address: d.address || '' },
+                                capacity: Number(d.capacity) || 200,
+                                amenities: Array.isArray(d.amenities) ? d.amenities : (d.amenities ? String(d.amenities).split(',').map(s => s.trim()).filter(Boolean) : []),
+                                images: d.image ? [d.image] : [],
+                                priceMinorPerHour: Math.round((Number(d.pricePerHour) || 10000) * 100),
+                                currency: 'INR',
+                                owner: applicantId,
+                                status: 'published'
+                            });
+                        }
+                    }
                 }
                 return res.json({ application, message: `Application was already ${application.status}` });
             }
@@ -39,6 +60,27 @@ router.post('/admin/applications/:id/review', validate(review), async (req, res,
             const role = application.type === 'organizer' ? 'event_organizer' : 'venue_owner';
             const applicantId = application.applicant?._id || application.applicant;
             await User.updateOne({ _id: applicantId }, { $addToSet: { roles: role } });
+            if (application.type === 'venue_owner' && application.details?.venueName) {
+                const d = application.details;
+                const existing = await Venue.findOne({ owner: applicantId, name: d.venueName });
+                if (!existing) {
+                    const slug = String(d.venueName).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
+                    await Venue.create({
+                        name: d.venueName,
+                        slug,
+                        description: d.description || 'Premier venue for events and celebrations.',
+                        type: d.type || 'Banquet Halls',
+                        location: { city: d.city || 'Chennai', address: d.address || '' },
+                        capacity: Number(d.capacity) || 200,
+                        amenities: Array.isArray(d.amenities) ? d.amenities : (d.amenities ? String(d.amenities).split(',').map(s => s.trim()).filter(Boolean) : []),
+                        images: d.image ? [d.image] : [],
+                        priceMinorPerHour: Math.round((Number(d.pricePerHour) || 10000) * 100),
+                        currency: 'INR',
+                        owner: applicantId,
+                        status: 'published'
+                    });
+                }
+            }
         }
         await AuditLog.create({ actor: req.user.id, action: `application.${application.status}`, resourceType: 'Application', resourceId: application.id });
         res.json({ application });

@@ -85,70 +85,85 @@ export async function downloadEventTickets(booking) {
   const dateLine = String(booking.date || "Scheduled Date").trim();
   const isVenue = Boolean(booking.isVenueReservation);
 
-  for (let attendee = 1; attendee <= quantity; attendee += 1) {
-    if (attendee > 1) pdf.addPage([210, 90], "landscape");
-    const ticketId = `${booking.id || "EVT"}-P${String(attendee).padStart(2, "0")}`;
-    const qr = await QRCode.toDataURL(ticketQrPayload(booking, attendee), { errorCorrectionLevel: "M", margin: 4, width: 800 });
+  const ticketId = `${booking.id || "EVT"}`;
+  const qr = await QRCode.toDataURL(ticketQrPayload(booking, 1), { errorCorrectionLevel: "M", margin: 4, width: 800 });
 
-    drawTicketBase(pdf);
+  drawTicketBase(pdf);
 
-    pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(8);
-    pdf.text(isVenue ? "EVENTORIA  /  VENUE RESERVATION" : "EVENTORIA  /  LIVE EXPERIENCE", 16, 18);
-    pdf.setFontSize(21);
-    const titleLines = pdf.splitTextToSize(eventTitle.toUpperCase(), 105);
-    pdf.text(titleLines, 16, 36);
-    const infoY = Math.min(59, 38 + titleLines.length * 8);
-    pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5);
-    pdf.text(`${dateLine}  /  ${timeLine}`, 16, infoY);
-    pdf.text(venueLine, 16, infoY + 6);
-    pdf.setFontSize(6.5); pdf.setTextColor(218, 205, 234);
-    pdf.text(`BOOKING ${booking.id || "REFERENCE"}   |   ORDER TOTAL ${paid}`, 16, 76);
+  pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(8);
+  pdf.text(isVenue ? "EVENTORIA  /  VENUE RESERVATION" : (quantity > 1 ? `EVENTORIA  /  LIVE EXPERIENCE  —  GROUP PASS (${quantity} ATTENDEES)` : "EVENTORIA  /  LIVE EXPERIENCE"), 16, 18);
+  pdf.setFontSize(21);
+  const titleLines = pdf.splitTextToSize(eventTitle.toUpperCase(), 105);
+  pdf.text(titleLines, 16, 36);
+  const infoY = Math.min(59, 38 + titleLines.length * 8);
+  pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5);
+  pdf.text(`${dateLine}  /  ${timeLine}`, 16, infoY);
+  pdf.text(venueLine, 16, infoY + 6);
+  pdf.setFontSize(6.5); pdf.setTextColor(218, 205, 234);
+  pdf.text(`BOOKING ${booking.id || "REFERENCE"}   |   ${quantity > 1 ? `GROUP PASS FOR ${quantity} MEMBERS` : 'SINGLE PASS'}   |   ORDER TOTAL ${paid}`, 16, 76);
 
-    pdf.setFillColor(255, 250, 253); pdf.rect(145, 7, 58, 76, "F");
-    pdf.setDrawColor(92, 46, 122); pdf.setLineDashPattern([1.2, 1.5], 0); pdf.line(145, 10, 145, 80); pdf.setLineDashPattern([], 0);
-    pdf.setFillColor(239, 241, 246); pdf.circle(145, 7, 3.2, "F"); pdf.circle(145, 83, 3.2, "F");
-    pdf.setTextColor(55, 29, 78); pdf.setFont("helvetica", "bold"); pdf.setFontSize(7);
-    pdf.text("ADMIT ONE", 153, 14);
-    pdf.setFontSize(5); pdf.setTextColor(126, 100, 141); pdf.text("TICKET HOLDER", 153, 19);
-    pdf.setFont("helvetica", "bold"); pdf.setFontSize(6.5); pdf.setTextColor(55, 29, 78);
-    pdf.text(pdf.splitTextToSize(customerName, 40)[0], 153, 23.5);
-    pdf.setFontSize(5.5); pdf.setTextColor(126, 100, 141);
-    pdf.text("GATE", 153, 28); pdf.text("ROW", 170, 28); pdf.text("TICKET", 187, 28);
-    pdf.setFont("helvetica", "bold"); pdf.setFontSize(9); pdf.setTextColor(55, 29, 78);
-    pdf.text("01", 153, 34);
-    pdf.text(ticketType === "General Admission" ? "GA" : ticketType.slice(0, 3).toUpperCase(), 170, 34);
-    pdf.text(String(attendee).padStart(2, "0"), 187, 34);
-    pdf.setFillColor(255, 255, 255); pdf.roundedRect(157, 36, 34, 34, 2, 2, "F");
-    pdf.addImage(qr, "PNG", 158, 37, 32, 32);
-    pdf.setFontSize(6.5); pdf.setTextColor(55, 29, 78); pdf.text("SCAN FOR ENTRY", 174, 74, { align: "center" });
-    pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.text(ticketId, 174, 79, { align: "center" });
+  pdf.setFillColor(255, 250, 253); pdf.rect(145, 7, 58, 76, "F");
+  pdf.setDrawColor(92, 46, 122); pdf.setLineDashPattern([1.2, 1.5], 0); pdf.line(145, 10, 145, 80); pdf.setLineDashPattern([], 0);
+  pdf.setFillColor(239, 241, 246); pdf.circle(145, 7, 3.2, "F"); pdf.circle(145, 83, 3.2, "F");
+  pdf.setTextColor(55, 29, 78); pdf.setFont("helvetica", "bold"); pdf.setFontSize(quantity > 1 ? 6.5 : 7);
+  pdf.text(quantity > 1 ? `ADMIT ${quantity} ATTENDEES` : "ADMIT ONE", 153, 14);
+  pdf.setFontSize(5); pdf.setTextColor(126, 100, 141); pdf.text("TICKET HOLDER", 153, 19);
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(6.5); pdf.setTextColor(55, 29, 78);
+  pdf.text(pdf.splitTextToSize(customerName, 40)[0], 153, 23.5);
+  pdf.setFontSize(5.5); pdf.setTextColor(126, 100, 141);
+  pdf.text("GATE", 153, 28); pdf.text("TYPE", 168, 28); pdf.text("ADMIT", 185, 28);
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(8.5); pdf.setTextColor(55, 29, 78);
+  pdf.text("01", 153, 34);
+  pdf.text(ticketType === "General Admission" ? "GA" : ticketType.slice(0, 3).toUpperCase(), 168, 34);
+  pdf.text(String(quantity).padStart(2, "0"), 185, 34);
+  pdf.setFillColor(255, 255, 255); pdf.roundedRect(157, 36, 34, 34, 2, 2, "F");
+  pdf.addImage(qr, "PNG", 158, 37, 32, 32);
+  pdf.setFontSize(6); pdf.setTextColor(55, 29, 78); pdf.text(quantity > 1 ? `SCAN FOR ENTRY (TOTAL: ${quantity})` : "SCAN FOR ENTRY", 174, 74, { align: "center" });
+  pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.text(ticketId, 174, 79, { align: "center" });
 
-    // Back side: one matching reverse page for every attendee ticket.
-    pdf.addPage([210, 90], "landscape");
-    drawTicketBase(pdf);
-    pdf.setFillColor(44, 13, 82); pdf.rect(7, 7, 196, 76, "F");
-    pdf.setFillColor(76, 25, 119); pdf.circle(184, 13, 24, "F");
-    pdf.setFillColor(229, 20, 112); pdf.circle(18, 15, 13, "F");
-    pdf.setFillColor(0, 190, 199); pdf.circle(126, 10, 10, "F");
-    pdf.setFillColor(255, 60, 119); pdf.circle(197, 77, 16, "F");
-    pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(17);
-    pdf.text(eventTitle.toUpperCase(), 18, 29, { maxWidth: 170 });
-    pdf.setFontSize(8); pdf.text("EVENT GUIDELINES", 18, 37);
-    pdf.setDrawColor(190, 166, 211); pdf.setLineWidth(.25); pdf.line(51, 35.5, 139, 35.5); pdf.line(103, 42, 103, 72);
+  // Back side: Guidelines & group entry rules
+  pdf.addPage([210, 90], "landscape");
+  drawTicketBase(pdf);
+  pdf.setFillColor(44, 13, 82); pdf.rect(7, 7, 196, 76, "F");
+  pdf.setFillColor(76, 25, 119); pdf.circle(184, 13, 24, "F");
+  pdf.setFillColor(229, 20, 112); pdf.circle(18, 15, 13, "F");
+  pdf.setFillColor(0, 190, 199); pdf.circle(126, 10, 10, "F");
+  pdf.setFillColor(255, 60, 119); pdf.circle(197, 77, 16, "F");
+  pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(16);
+  pdf.text(quantity > 1 ? `${eventTitle.toUpperCase()}  —  GROUP PASS (${quantity} ATTENDEES)` : eventTitle.toUpperCase(), 18, 29, { maxWidth: 170 });
+  pdf.setFontSize(8); pdf.text("EVENT GUIDELINES & ENTRY INSTRUCTIONS", 18, 37);
+  pdf.setDrawColor(190, 166, 211); pdf.setLineWidth(.25); pdf.line(80, 35.5, 139, 35.5); pdf.line(103, 42, 103, 72);
 
-    const leftGuidelines = [["ticket", "Please keep this ticket until\nthe event ends."], ["person", "Entry is valid for one person only."], ["scan", "Show your QR code at the entry gate."]];
-    const rightGuidelines = [["no-entry", "No re-entry without authorization."], ["bag", "Keep your belongings safe."], ["info", "For assistance, contact the event\nhelp desk."]];
-    [47, 57, 67].forEach((y, index) => {
-      drawGuidelineIcon(pdf, 22, y, leftGuidelines[index][0]); drawGuidelineIcon(pdf, 111, y, rightGuidelines[index][0]);
-      pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.5); pdf.setTextColor(255, 255, 255);
-      pdf.text(leftGuidelines[index][1].split("\n"), 29, y - 1); pdf.text(rightGuidelines[index][1].split("\n"), 118, y - 1);
-    });
-    pdf.setDrawColor(216, 199, 229); pdf.line(159, 65, 184, 65);
-    pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.setTextColor(222, 207, 234); pdf.text("BOOKING REFERENCE", 160, 71);
-    pdf.setFont("helvetica", "bold"); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255); pdf.text(booking.id || "REFERENCE", 160, 77);
-    pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.setTextColor(222, 207, 234); pdf.text("TICKET HOLDER", 160, 52);
-    pdf.setFont("helvetica", "bold"); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255); pdf.text(pdf.splitTextToSize(customerName, 34)[0], 160, 58);
-  }
+  const leftGuidelines = quantity > 1 ? [
+    ["ticket", `This single ticket admits all ${quantity} members\nof your registered group.`],
+    ["person", `Attendees can enter together or arrive\nseparately at different times.`],
+    ["scan", `Staff scans this same QR code and logs\neach member's entry incrementally.`]
+  ] : [
+    ["ticket", "Please keep this ticket until\nthe event ends."],
+    ["person", "Entry is valid for one person only."],
+    ["scan", "Show your QR code at the entry gate."]
+  ];
+
+  const rightGuidelines = quantity > 1 ? [
+    ["no-entry", `Total entries allowed: ${quantity}. Once all ${quantity}\nhave entered, ticket is marked fully used.`],
+    ["bag", "Keep your belongings and confirmation code safe."],
+    ["info", "For partial check-in questions, contact gate staff."]
+  ] : [
+    ["no-entry", "No re-entry without authorization."],
+    ["bag", "Keep your belongings safe."],
+    ["info", "For assistance, contact the event\nhelp desk."]
+  ];
+
+  [47, 57, 67].forEach((y, index) => {
+    drawGuidelineIcon(pdf, 22, y, leftGuidelines[index][0]); drawGuidelineIcon(pdf, 111, y, rightGuidelines[index][0]);
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.2); pdf.setTextColor(255, 255, 255);
+    pdf.text(leftGuidelines[index][1].split("\n"), 29, y - 1); pdf.text(rightGuidelines[index][1].split("\n"), 118, y - 1);
+  });
+  pdf.setDrawColor(216, 199, 229); pdf.line(159, 65, 184, 65);
+  pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.setTextColor(222, 207, 234); pdf.text("BOOKING REFERENCE", 160, 71);
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255); pdf.text(booking.id || "REFERENCE", 160, 77);
+  pdf.setFont("helvetica", "normal"); pdf.setFontSize(5.5); pdf.setTextColor(222, 207, 234); pdf.text("TOTAL TICKETS", 160, 52);
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255); pdf.text(`${quantity} ${quantity === 1 ? 'Person' : 'Members'}`, 160, 58);
 
   const filename = `${booking.id || 'EVT-TICKET'}-Eventoria-tickets.pdf`;
   if (typeof document !== "undefined" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {

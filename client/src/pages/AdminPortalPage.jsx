@@ -208,6 +208,12 @@ export default function AdminPortalPage() {
                       </div>
                     )}
 
+                    {isApplication && (item.type === 'venue_owner' || item.details?.venueName) && (
+                      <div style={{ margin: '0.4rem 0', padding: '0.4rem 0.65rem', background: '#ecfdf5', borderRadius: '6px', fontSize: '0.82rem', border: '1px solid #a7f3d0', color: '#065f46' }}>
+                        <strong>🏰 Proposed Venue:</strong> {item.details?.venueName || 'Venue'} · {item.details?.type || 'Space'} ({item.details?.city || 'Location'}) {item.details?.capacity ? `— Capacity: ${item.details.capacity}` : ''} {item.details?.pricePerHour ? `· ₹${item.details.pricePerHour}/hr` : ''}
+                      </div>
+                    )}
+
                     <p className="approval-card-desc">
                       {item.details?.description || item.description || 'Waiting for administrator review.'}
                     </p>
@@ -421,40 +427,80 @@ export default function AdminPortalPage() {
                     </div>
                   </div>
 
-                  {/* Proposed Event & Category Info */}
-                  <div className="admin-detail-card" style={{ borderLeft: '4px solid #2563eb', background: '#f8faff' }}>
-                    <h4 style={{ color: '#1d4ed8' }}>
-                      <CalendarDays size={16} /> Proposed Event & Specialization
-                    </h4>
-                    <div className="admin-detail-grid">
-                      <div>
-                        <span>Event Category</span>
-                        <strong>{selectedRecord.item.details?.eventCategory || 'Entertainment / General'}</strong>
-                      </div>
-                      <div>
-                        <span>Subcategory / Genre</span>
-                        <strong>{selectedRecord.item.details?.eventSubcategory || 'Standard'}</strong>
-                      </div>
-                      <div className="grid-full-width">
-                        <span>Proposed Event Concept</span>
-                        <strong style={{ fontSize: '1rem', color: '#1e293b' }}>
-                          {selectedRecord.item.details?.plannedEventTitle || selectedRecord.item.details?.organizationName || 'Not specified'}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>Target City / Market</span>
-                        <strong>{selectedRecord.item.details?.targetCity || selectedRecord.item.details?.address || 'Not specified'}</strong>
-                      </div>
-                      <div>
-                        <span>Expected Audience Scale</span>
-                        <strong>{selectedRecord.item.details?.expectedAttendees || '100 - 500 attendees'}</strong>
-                      </div>
-                      <div>
-                        <span>Event Format</span>
-                        <strong>{selectedRecord.item.details?.eventType || 'In-person live event'}</strong>
+                  {/* Proposed Event or Proposed Venue */}
+                  {selectedRecord.item.type === 'venue_owner' || selectedRecord.item.details?.venueName ? (
+                    <div className="admin-detail-card" style={{ borderLeft: '4px solid #059669', background: '#f0fdf4' }}>
+                      <h4 style={{ color: '#047857' }}>
+                        <Building2 size={16} /> Proposed Venue Information
+                      </h4>
+                      <div className="admin-detail-grid">
+                        <div>
+                          <span>Venue Name</span>
+                          <strong>{selectedRecord.item.details?.venueName || 'Venue'}</strong>
+                        </div>
+                        <div>
+                          <span>Venue Type</span>
+                          <strong>{selectedRecord.item.details?.type || 'Space'}</strong>
+                        </div>
+                        <div>
+                          <span>City / Location</span>
+                          <strong>{selectedRecord.item.details?.city || 'Not specified'}{selectedRecord.item.details?.address ? `, ${selectedRecord.item.details.address}` : ''}</strong>
+                        </div>
+                        <div>
+                          <span>Guest Capacity</span>
+                          <strong>{selectedRecord.item.details?.capacity || 'N/A'} Guests</strong>
+                        </div>
+                        <div>
+                          <span>Rate / Hour</span>
+                          <strong>₹{selectedRecord.item.details?.pricePerHour || '0'} / hr</strong>
+                        </div>
+                        <div>
+                          <span>Amenities</span>
+                          <strong>{Array.isArray(selectedRecord.item.details?.amenities) ? selectedRecord.item.details.amenities.join(', ') : selectedRecord.item.details?.amenities || 'Standard'}</strong>
+                        </div>
+                        {selectedRecord.item.details?.image && (
+                          <div className="grid-full-width" style={{ marginTop: 8 }}>
+                            <span>Venue Photo</span>
+                            <img src={selectedRecord.item.details.image} alt="Venue" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 8, marginTop: 4 }} />
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="admin-detail-card" style={{ borderLeft: '4px solid #2563eb', background: '#f8faff' }}>
+                      <h4 style={{ color: '#1d4ed8' }}>
+                        <CalendarDays size={16} /> Proposed Event & Specialization
+                      </h4>
+                      <div className="admin-detail-grid">
+                        <div>
+                          <span>Event Category</span>
+                          <strong>{selectedRecord.item.details?.eventCategory || 'Entertainment / General'}</strong>
+                        </div>
+                        <div>
+                          <span>Subcategory / Genre</span>
+                          <strong>{selectedRecord.item.details?.eventSubcategory || 'Standard'}</strong>
+                        </div>
+                        <div className="grid-full-width">
+                          <span>Proposed Event Concept</span>
+                          <strong style={{ fontSize: '1rem', color: '#1e293b' }}>
+                            {selectedRecord.item.details?.plannedEventTitle || selectedRecord.item.details?.organizationName || 'Not specified'}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Target City / Market</span>
+                          <strong>{selectedRecord.item.details?.targetCity || selectedRecord.item.details?.address || 'Not specified'}</strong>
+                        </div>
+                        <div>
+                          <span>Expected Audience Scale</span>
+                          <strong>{selectedRecord.item.details?.expectedAttendees || '100 - 500 attendees'}</strong>
+                        </div>
+                        <div>
+                          <span>Event Format</span>
+                          <strong>{selectedRecord.item.details?.eventType || 'In-person live event'}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Organization & Credentials */}
                   <div className="admin-detail-card">

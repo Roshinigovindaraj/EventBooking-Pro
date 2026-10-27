@@ -64,7 +64,7 @@ router.post('/organizer/bookings/:id/refund', authorize('event_organizer'), vali
 
 const venueBody = z.object({ name: z.string().trim().min(2).max(160), description: z.string().min(5).max(10000), type: z.string().min(2).max(80), city: z.string().min(2).max(100), address: z.string().max(300).optional(), timezone: z.string().default('Asia/Kolkata'), capacity: z.number().int().positive(), amenities: z.array(z.string().max(80)).max(50).default([]), images: z.array(z.string().url()).max(10).default([]), priceMinorPerHour: z.number().int().min(0), currency: z.string().length(3).default('INR'), manualApproval: z.boolean().default(false) });
 router.get('/venue-owner/venues', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => { try { const filter = req.user.roles.some(r => ['admin','super_admin'].includes(r)) ? {} : { owner: req.user.id }; res.json({ items: await Venue.find(filter).populate('owner', 'name email').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
-router.post('/venue-owner/venues', authenticate, validate(z.object({ body: venueBody })), async (req, res, next) => {
+router.post('/venue-owner/venues', authorize('venue_owner', 'admin', 'super_admin'), validate(z.object({ body: venueBody })), async (req, res, next) => {
   try {
     const { city, address, ...body } = req.body;
     const venue = await Venue.create({
@@ -73,11 +73,10 @@ router.post('/venue-owner/venues', authenticate, validate(z.object({ body: venue
       slug: `${slugify(body.name)}-${Date.now().toString(36)}`,
       owner: req.user.id
     });
-    await User.updateOne({ _id: req.user.id }, { $addToSet: { roles: 'venue_owner' } });
     res.status(201).json({ venue });
   } catch (e) { next(e); }
 });
-router.post('/venue-owner/venues/:id/submit', authenticate, async (req, res, next) => {
+router.post('/venue-owner/venues/:id/submit', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => {
   try {
     const filter = req.user.roles?.some(r => ['admin', 'super_admin'].includes(r))
       ? { _id: req.params.id, status: { $in: ['draft', 'rejected'] } }
@@ -172,6 +171,82 @@ router.post('/venue-owner/reservations/:id/reject', authorize('venue_owner', 'ad
     await reservation.save();
 
     res.json({ reservation });
+  } catch (e) { next(e); }
+});
+
+router.get('/venue-owner/staff', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const staff = await User.find({ roles: 'venue_staff', status: 'active' }).select('name email');
+    res.json({ items: staff });
+  } catch (e) { next(e); }
+});
+
+router.get('/venue-owner/tasks', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const isPlatformAdmin = req.user.roles?.some(r => ['admin', 'super_admin'].includes(r));
+    let venueFilter = {};
+    if (!isPlatformAdmin) {
+      const myVenues = await Venue.find({ owner: req.user.id }).select('_id');
+      venueFilter = { venue: { $in: myVenues.map(v => v._id) } };
+    }
+    const tasks = await OperationalTask.find(venueFilter)
+      .populate('venue', 'name location')
+      .populate('reservation', 'purpose reference startsAt endsAt')
+      .populate('assignee', 'name email')
+      .sort({ createdAt: -1 });
+    res.json({ items: tasks });
+  } catch (e) { next(e); }
+});
+
+router.post('/venue-owner/tasks', authorize('venue_owner', 'admin', 'super_admin'), validate(z.object({
+  body: z.object({
+    venueId: z.string().regex(/^[a-f\d]{24}$/i),
+    reservationId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable(),
+    assigneeId: z.string().regex(/^[a-f\d]{24}$/i),
+    title: z.string().trim().min(3).max(180),
+    notes: z.string().max(2000).optional(),
+  })
+})), async (req, res, next) => {
+  try {
+    const venue = await Venue.findById(req.body.venueId);
+    if (!venue) throw notFound('Venue not found');
+    const isPlatformAdmin = req.user.roles?.some(r => ['admin', 'super_admin'].includes(r));
+    if (!isPlatformAdmin && String(venue.owner) !== String(req.user.id)) {
+      throw new AppError(403, 'FORBIDDEN', 'You do not own this venue.');
+    }
+    const assignee = await User.findById(req.body.assigneeId);
+    if (!assignee || !assignee.roles.includes('venue_staff')) {
+      throw new AppError(404, 'STAFF_NOT_FOUND', 'Active venue staff member not found.');
+    }
+
+    const task = await OperationalTask.create({
+      venue: venue.id,
+      reservation: req.body.reservationId || null,
+      assignee: assignee.id,
+      title: req.body.title.trim(),
+      notes: req.body.notes ? req.body.notes.trim() : '',
+      status: 'todo',
+    });
+
+    const populated = await OperationalTask.findById(task.id)
+      .populate('venue', 'name')
+      .populate('reservation', 'purpose reference startsAt endsAt')
+      .populate('assignee', 'name email');
+
+    res.status(201).json({ task: populated });
+  } catch (e) { next(e); }
+});
+
+router.delete('/venue-owner/tasks/:id', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const task = await OperationalTask.findById(req.params.id).populate('venue');
+    if (!task) throw notFound('Task not found');
+    const isPlatformAdmin = req.user.roles?.some(r => ['admin', 'super_admin'].includes(r));
+    if (!isPlatformAdmin && String(task.venue?.owner) !== String(req.user.id)) {
+      throw new AppError(403, 'FORBIDDEN', 'You do not have permission to delete this task.');
+    }
+    await OperationalTask.deleteOne({ _id: task.id });
+    res.json({ result: 'deleted', id: task.id });
   } catch (e) { next(e); }
 });
 

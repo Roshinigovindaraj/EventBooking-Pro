@@ -52,8 +52,10 @@ export const publicEvent = (event, index = 0) => {
   const start = new Date(event.startsAt);
   const end = new Date(event.endsAt);
   const prices = (event.ticketTypes || []).map((ticket) => ticket.priceMinor / 100);
-  const capacity = (event.ticketTypes || []).reduce((sum, ticket) => sum + ticket.capacity, 0);
-  const used = (event.ticketTypes || []).reduce((sum, ticket) => sum + (ticket.sold || 0) + (ticket.reserved || 0), 0);
+  const capacity = event.totalCapacity ?? (event.ticketTypes || []).reduce((sum, ticket) => sum + (ticket.capacity || 0), 0);
+  const used = event.totalSold ?? (event.ticketTypes || []).reduce((sum, ticket) => sum + (ticket.sold || 0) + (ticket.reserved || 0), 0);
+  const remainingTickets = event.remainingTickets ?? Math.max(0, capacity - used);
+  const isSoldOut = capacity > 0 && remainingTickets === 0;
   const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.valueOf());
   const formatTime = (date) => isValidDate(date) ? date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "";
 
@@ -72,7 +74,11 @@ export const publicEvent = (event, index = 0) => {
     priceValue: prices.length ? Math.min(...prices) : 0,
     startsAt: event.startsAt,
     mode: "In-Person Events",
-    availability: capacity > 0 && used >= capacity ? "Sold Out" : "Available Tickets",
+    capacity,
+    used,
+    remainingTickets,
+    isSoldOut,
+    availability: isSoldOut ? "Sold Out" : "Available Tickets",
     recommendation: 100 - index,
   };
 };
@@ -281,7 +287,22 @@ function EventCard({ event, index, onView }) {
       </div>
       <div className="evx-card-copy">
         <h3>{event.title}</h3>
-        <span className={`evx-tag t${index % 7}`}>{event.type}</span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 6px' }}>
+          <span className={`evx-tag t${index % 7}`}>{event.type}</span>
+          {event.capacity > 0 && (
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: '2px 8px',
+              borderRadius: 6,
+              background: event.isSoldOut ? '#fee2e2' : (event.remainingTickets < 25 ? '#ffedd5' : '#ecfdf5'),
+              color: event.isSoldOut ? '#991b1b' : (event.remainingTickets < 25 ? '#c2410c' : '#047857'),
+              border: `1px solid ${event.isSoldOut ? '#fecaca' : (event.remainingTickets < 25 ? '#fed7aa' : '#a7f3d0')}`
+            }}>
+              {event.isSoldOut ? 'Sold Out' : `🎟️ ${event.remainingTickets} / ${event.capacity} left`}
+            </span>
+          )}
+        </div>
         <p>
           <MapPin /> {event.venue},<br />
           <i /> {event.city}, Tamil Nadu
@@ -796,7 +817,7 @@ export default function CatalogPage() {
           )}
         </section>
       </main>
-      {selectedEvent && <div className="guest-modal" role="dialog" aria-modal="true" aria-label={`${selectedEvent.title} details`} onClick={(event) => event.target === event.currentTarget && setSelectedEvent(null)}><article><button className="guest-modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close details">×</button><img src={selectedEvent.image} alt={selectedEvent.title}/><div className="guest-modal-copy"><span className="guest-type">{selectedEvent.type}</span><h2>{selectedEvent.title}</h2><p><CalendarDays/> {selectedEvent.day} {selectedEvent.month} {new Date(selectedEvent.startsAt).getFullYear()} · {selectedEvent.time}</p><p><MapPin/> {selectedEvent.venue}, {selectedEvent.city}, Tamil Nadu</p><div className="guest-facts"><span><b>{selectedEvent.price}</b> onwards</span><span><b>{selectedEvent.availability}</b> availability</span><span><b>{selectedEvent.mode}</b> event</span></div><p className="guest-description">Enjoy a verified Eventoria experience with complete venue information, secure ticketing and clear event details.</p><div className="guest-actions"><button onClick={() => shareItem(selectedEvent)}><Share2/> Share</button><button onClick={() => compareItem(selectedEvent)}><GitCompareArrows/> Compare</button><a target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${selectedEvent.venue}, ${selectedEvent.city}`)}`}><ExternalLink/> Map</a></div><div className="guest-reviews"><b>Guest reviews</b><span>★ 4.8 · “Clear details and a smooth booking experience.”</span></div>{guestNotice&&<small className="guest-notice">{guestNotice}</small>}<button className="guest-book" onClick={() => bookItem(selectedEvent)}>Book Now <small>{user ? "Continue to booking" : "Login required"}</small><ArrowRight/></button></div></article></div>}
+      {selectedEvent && <div className="guest-modal" role="dialog" aria-modal="true" aria-label={`${selectedEvent.title} details`} onClick={(event) => event.target === event.currentTarget && setSelectedEvent(null)}><article><button className="guest-modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close details">×</button><img src={selectedEvent.image} alt={selectedEvent.title}/><div className="guest-modal-copy"><span className="guest-type">{selectedEvent.type}</span><h2>{selectedEvent.title}</h2><p><CalendarDays/> {selectedEvent.day} {selectedEvent.month} {new Date(selectedEvent.startsAt).getFullYear()} · {selectedEvent.time}</p><p><MapPin/> {selectedEvent.venue}, {selectedEvent.city}, Tamil Nadu</p><div className="guest-facts"><span><b>{selectedEvent.price}</b> onwards</span><span><b>{selectedEvent.remainingTickets !== undefined ? `${selectedEvent.remainingTickets} of ${selectedEvent.capacity} remaining` : selectedEvent.availability}</b></span><span><b>{selectedEvent.mode}</b> event</span></div><p className="guest-description">Enjoy a verified Eventoria experience with complete venue information, secure ticketing and clear event details.</p><div className="guest-actions"><button onClick={() => shareItem(selectedEvent)}><Share2/> Share</button><button onClick={() => compareItem(selectedEvent)}><GitCompareArrows/> Compare</button><a target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${selectedEvent.venue}, ${selectedEvent.city}`)}`}><ExternalLink/> Map</a></div><div className="guest-reviews"><b>Guest reviews</b><span>★ 4.8 · “Clear details and a smooth booking experience.”</span></div>{guestNotice&&<small className="guest-notice">{guestNotice}</small>}<button className="guest-book" onClick={() => bookItem(selectedEvent)}>Book Now <small>{user ? "Continue to booking" : "Login required"}</small><ArrowRight/></button></div></article></div>}
       <section className="evx-news">
         <div>
           <small>Stay Updated</small>
