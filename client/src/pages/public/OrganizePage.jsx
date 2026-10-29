@@ -1,10 +1,11 @@
 import React from "react";
-import { ArrowRight, BarChart3, CalendarDays, Check, Clock, FileText, Headphones, Image, MapPin, Megaphone, Play, Settings, ShieldCheck, Ticket, Users } from "lucide-react";
+import { AlertCircle, ArrowRight, BarChart3, CalendarDays, Check, Clock, FileText, Headphones, Image, MapPin, Megaphone, Play, Settings, ShieldCheck, Ticket, Users, Plus, Trash2, Crown, Sparkles } from "lucide-react";
 import { Topbar } from "./CatalogPage.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
 import { apiRequest } from "../../services/apiClient.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { fireConfettiCelebration } from "../../components/CelebrationPoppers.jsx";
 
 const steps = [
   ["Event Details", "Basic information", FileText],
@@ -12,6 +13,57 @@ const steps = [
   ["Tickets & Pricing", "Ticket types and pricing", Ticket],
   ["Media & Description", "Images and event details", Image],
   ["Review & Publish", "Check and go live", Check],
+];
+
+const TICKET_PRESETS = [
+  {
+    key: "general",
+    label: "General Admission",
+    icon: "⭐",
+    name: "General Admission",
+    defaultPrice: "200",
+    defaultCapacity: "100",
+    color: "#2563eb",
+    bg: "#eff6ff",
+    border: "#bfdbfe",
+    perk: "Standard entry & seated/standing zone",
+  },
+  {
+    key: "vip",
+    label: "VIP Pass",
+    icon: "👑",
+    name: "VIP Pass",
+    defaultPrice: "600",
+    defaultCapacity: "30",
+    color: "#d97706",
+    bg: "#fffbeb",
+    border: "#fde68a",
+    perk: "Fast-track gate access, premium seating & VIP lounge",
+  },
+  {
+    key: "vvip",
+    label: "VVIP / Premium",
+    icon: "💎",
+    name: "VVIP All-Access Pass",
+    defaultPrice: "1200",
+    defaultCapacity: "15",
+    color: "#be185d",
+    bg: "#fdf2f8",
+    border: "#fbcfe8",
+    perk: "Front row seating, backstage access & complimentary drinks",
+  },
+  {
+    key: "early_bird",
+    label: "Early Bird",
+    icon: "⚡",
+    name: "Early Bird Special",
+    defaultPrice: "100",
+    defaultCapacity: "50",
+    color: "#059669",
+    bg: "#ecfdf5",
+    border: "#a7f3d0",
+    perk: "Limited discounted early registration tickets",
+  },
 ];
 
 const quickSteps = [
@@ -84,8 +136,79 @@ export default function OrganizePage() {
   const [editingPending, setEditingPending] = React.useState(false);
   const [step, setStep] = React.useState(0);
   const [notice, setNotice] = React.useState("");
+  const [formError, setFormError] = React.useState("");
+  const [profileNotice, setProfileNotice] = React.useState("");
   const [saving, setSaving] = React.useState(false);
-  const [form, setForm] = React.useState({ title: "", category: "", subcategory: "", description: "", type: "in-person", venueName: "", city: "", address: "", startsAt: "", endsAt: "", ticketName: "General Admission", price: "499", capacity: "100", image: "" });
+  const [form, setForm] = React.useState({ title: "", category: "", subcategory: "", description: "", type: "in-person", venueName: "", city: "", address: "", startsAt: "", endsAt: "", ticketName: "General Admission", price: "200", capacity: "100", image: "" });
+
+  const [tickets, setTickets] = React.useState([
+    { id: 't_1', tierKey: 'general', name: 'General Admission', price: '200', capacity: '100' }
+  ]);
+
+  const updateTicket = (id, field, value) => {
+    setTickets(prev => prev.map(t => {
+      if (t.id === id) {
+        const updated = { ...t, [field]: value };
+        if (field === 'name') {
+          const lower = value.toLowerCase();
+          if (lower.includes('vip') && !lower.includes('vvip')) updated.tierKey = 'vip';
+          else if (lower.includes('vvip')) updated.tierKey = 'vvip';
+          else if (lower.includes('early')) updated.tierKey = 'early_bird';
+          else updated.tierKey = 'general';
+        }
+        return updated;
+      }
+      return t;
+    }));
+  };
+
+  const addTicketTier = (presetKey = 'vip') => {
+    const preset = TICKET_PRESETS.find(p => p.key === presetKey) || TICKET_PRESETS[1];
+    const newId = 't_' + Date.now().toString() + Math.random().toString(36).slice(2, 6);
+    setTickets(prev => [
+      ...prev,
+      {
+        id: newId,
+        tierKey: preset.key,
+        name: preset.name,
+        price: preset.defaultPrice,
+        capacity: preset.defaultCapacity
+      }
+    ]);
+  };
+
+  const applyPresetToTicket = (id, presetKey) => {
+    const preset = TICKET_PRESETS.find(p => p.key === presetKey);
+    if (!preset) return;
+    setTickets(prev => prev.map(t => {
+      if (t.id === id) {
+        return {
+          ...t,
+          tierKey: preset.key,
+          name: preset.name,
+          price: preset.defaultPrice,
+          capacity: preset.defaultCapacity
+        };
+      }
+      return t;
+    }));
+  };
+
+  const removeTicketTier = (id) => {
+    if (tickets.length <= 1) return;
+    setTickets(prev => prev.filter(t => t.id !== id));
+  };
+
+  React.useEffect(() => {
+    if (tickets.length > 0) {
+      setForm(curr => ({
+        ...curr,
+        ticketName: tickets[0].name,
+        price: tickets[0].price,
+        capacity: tickets[0].capacity,
+      }));
+    }
+  }, [tickets]);
 
   const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
   const [startDate, setStartDate] = React.useState('');
@@ -138,22 +261,76 @@ export default function OrganizePage() {
   }, [user, isOrganizer]);
   React.useEffect(() => { if (location.hash === '#become-organizer') window.setTimeout(() => document.getElementById('become-organizer')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0); }, [location.hash]);
   const submitProfile = async (event) => {
-    event.preventDefault();
+    if (event?.preventDefault) event.preventDefault();
+    setFormError('');
+    setProfileNotice('');
+
+    // Field validation with visible error messaging
+    if (!profile.organizationName?.trim()) {
+      setFormError('Please enter your Organization / Brand name.');
+      return;
+    }
+    if (!profile.phone?.trim()) {
+      setFormError('Please enter your Mobile number.');
+      return;
+    }
+    if (!profile.address?.trim()) {
+      setFormError('Please enter your Business address.');
+      return;
+    }
+    if (!profile.bankAccount?.trim()) {
+      setFormError('Please enter your Bank account or UPI ID for ticket settlements.');
+      return;
+    }
+    if (!profile.description?.trim() || profile.description.trim().length < 20) {
+      setFormError('Organizer experience & proposal description must contain at least 20 characters.');
+      return;
+    }
+
+    // Smart auto-fill for Section 1 if empty so submission is never blocked
+    const plannedTitle = profile.plannedEventTitle?.trim() || `${profile.organizationName.trim()} Event Showcase`;
+    const targetCity = profile.targetCity?.trim() || (profile.address.split(',').slice(-2, -1)[0]?.trim()) || 'Tamil Nadu';
+    const subcategory = profile.eventSubcategory?.trim() || (categoryOptions[profile.eventCategory] || [])[0] || 'Concert';
+
+    const submissionPayload = {
+      ...profile,
+      plannedEventTitle: plannedTitle,
+      targetCity: targetCity,
+      eventCategory: profile.eventCategory || 'Entertainment',
+      eventSubcategory: subcategory,
+      expectedAttendees: profile.expectedAttendees || '100 - 500',
+      eventType: profile.eventType || 'in-person',
+    };
+
     setSaving(true);
-    setNotice('');
     try {
       const isUpdating = Boolean(application && application.status === 'pending');
       const method = isUpdating ? 'PUT' : 'POST';
       const endpoint = isUpdating ? '/organizer/applications/pending' : '/organizer/applications';
-      const result = await apiRequest(endpoint, {
-        method,
-        body: JSON.stringify({ details: profile }),
-      });
+      let result;
+      try {
+        result = await apiRequest(endpoint, {
+          method,
+          body: JSON.stringify({ details: submissionPayload }),
+        });
+      } catch (err) {
+        if (err.status === 409 || err.message?.includes('already pending')) {
+          result = await apiRequest('/organizer/applications/pending', {
+            method: 'PUT',
+            body: JSON.stringify({ details: submissionPayload }),
+          });
+        } else {
+          throw err;
+        }
+      }
+
       setApplication(result.application);
       setEditingPending(false);
-      setNotice(isUpdating ? 'Your event proposal and organizer profile were updated for admin review.' : 'Organizer application submitted with event details. An administrator will review it.');
+      fireConfettiCelebration();
+      setProfileNotice('✓ Application submitted successfully! An administrator will review your proposal.');
+      window.dispatchEvent(new Event('eventoria:data-changed'));
     } catch (error) {
-      setNotice(error.message);
+      setFormError(error.message || 'Failed to submit application. Please retry.');
     } finally {
       setSaving(false);
     }
@@ -185,15 +362,56 @@ export default function OrganizePage() {
   const saveEvent = async (submit) => {
     setSaving(true); setNotice("");
     try {
-      const required = [['title','Event title',0],['category','Event category',0],['subcategory','Event subcategory',0],['description','Description',0],['venueName','Venue name',1],['city','City',1],['startsAt','Start date and time',1],['endsAt','End date and time',1],['ticketName','Ticket name',2],['price','Ticket price',2],['capacity','Ticket capacity',2]];
+      const required = [
+        ['title', 'Event title', 0],
+        ['category', 'Event category', 0],
+        ['subcategory', 'Event subcategory', 0],
+        ['description', 'Description', 0],
+        ['venueName', 'Venue name', 1],
+        ['city', 'City', 1],
+        ['startsAt', 'Start date and time', 1],
+        ['endsAt', 'End date and time', 1]
+      ];
       const missing = required.find(([key]) => !String(form[key] ?? '').trim());
       if (missing) { setStep(missing[2]); throw new Error(`${missing[1]} is required.`); }
       if (form.description.trim().length < 20) { setStep(0); throw new Error('Description must contain at least 20 characters.'); }
       if (new Date(form.endsAt) <= new Date(form.startsAt)) { setStep(1); throw new Error('Event end must be after its start.'); }
-      if (Number(form.capacity) < 1 || Number(form.price) < 0) { setStep(2); throw new Error('Enter a valid ticket price and capacity.'); }
-      const payload = { title: form.title, description: form.description, category: form.category, subcategory: form.subcategory, venueName: form.venueName, city: form.city, address: form.address, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), images: form.image ? [form.image] : [], ticketTypes: [{ name: form.ticketName, priceMinor: Math.round(Number(form.price) * 100), currency: "INR", capacity: Number(form.capacity), minPerOrder: 1, maxPerOrder: 10 }] };
+
+      if (!tickets.length) { setStep(2); throw new Error('At least one ticket tier is required.'); }
+      for (let i = 0; i < tickets.length; i++) {
+        const t = tickets[i];
+        if (!t.name.trim()) { setStep(2); throw new Error(`Ticket name is required for tier #${i + 1}.`); }
+        if (Number(t.price) < 0 || isNaN(Number(t.price))) { setStep(2); throw new Error(`Enter a valid price for ticket "${t.name}".`); }
+        if (Number(t.capacity) < 1 || isNaN(Number(t.capacity))) { setStep(2); throw new Error(`Enter a valid capacity (at least 1) for ticket "${t.name}".`); }
+      }
+
+      const ticketTypes = tickets.map(t => ({
+        name: t.name.trim(),
+        priceMinor: Math.round(Number(t.price) * 100),
+        currency: "INR",
+        capacity: Number(t.capacity),
+        minPerOrder: 1,
+        maxPerOrder: 10
+      }));
+
+      const payload = {
+        title: form.title,
+        description: form.description,
+        category: form.category,
+        subcategory: form.subcategory,
+        venueName: form.venueName,
+        city: form.city,
+        address: form.address,
+        startsAt: new Date(form.startsAt).toISOString(),
+        endsAt: new Date(form.endsAt).toISOString(),
+        images: form.image ? [form.image] : [],
+        ticketTypes
+      };
       const result = await apiRequest("/organizer/events", { method: "POST", body: JSON.stringify(payload) });
-      if (submit) await apiRequest(`/organizer/events/${result.event._id}/submit`, { method: "POST" });
+      if (submit) {
+        await apiRequest(`/organizer/events/${result.event._id}/submit`, { method: "POST" });
+        fireConfettiCelebration();
+      }
       setNotice(submit ? "Event submitted for admin approval. It will appear to customers after approval." : "Event draft saved in your organizer workspace.");
       window.dispatchEvent(new Event("eventoria:data-changed"));
       if (submit) window.setTimeout(() => navigate('/portal/organizer'), 900);
@@ -349,9 +567,8 @@ export default function OrganizePage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
-                  Proposed Event Title / Concept <em>*</em>
+                  Proposed Event Title / Concept
                   <input
-                    required
                     placeholder="e.g. South India Music Festival 2026, Startup Innovation Summit"
                     value={profile.plannedEventTitle}
                     onChange={(e) => setProfile({ ...profile, plannedEventTitle: e.target.value })}
@@ -360,9 +577,8 @@ export default function OrganizePage() {
                 </label>
 
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
-                  Target City <em>*</em>
+                  Target City
                   <input
-                    required
                     placeholder="e.g. Chennai, Salem, Hyderabad"
                     value={profile.targetCity}
                     onChange={(e) => setProfile({ ...profile, targetCity: e.target.value })}
@@ -373,9 +589,8 @@ export default function OrganizePage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
-                  Expected Audience Scale <em>*</em>
+                  Expected Audience Scale
                   <select
-                    required
                     value={profile.expectedAttendees}
                     onChange={(e) => setProfile({ ...profile, expectedAttendees: e.target.value })}
                     style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
@@ -389,9 +604,8 @@ export default function OrganizePage() {
                 </label>
 
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#1e3a8a' }}>
-                  Event Format <em>*</em>
+                  Event Format
                   <select
-                    required
                     value={profile.eventType}
                     onChange={(e) => setProfile({ ...profile, eventType: e.target.value })}
                     style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #93c5fd', fontSize: 13, background: '#fff' }}
@@ -424,7 +638,7 @@ export default function OrganizePage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <label>
                   Website / social link
-                  <input type="url" placeholder="https://instagram.com/your-brand" value={profile.website} onChange={(e) => setProfile({ ...profile, website: e.target.value })} />
+                  <input type="text" placeholder="https://instagram.com/your-brand or handle" value={profile.website} onChange={(e) => setProfile({ ...profile, website: e.target.value })} />
                 </label>
                 <label>
                   Business address <em>*</em>
@@ -456,15 +670,77 @@ export default function OrganizePage() {
               </label>
             </div>
 
+            {formError && (
+              <div
+                style={{
+                  padding: '12px 16px',
+                  background: '#fef2f2',
+                  border: '1.5px solid #fecaca',
+                  borderRadius: '10px',
+                  color: '#dc2626',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <AlertCircle size={18} color="#dc2626" />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            {profileNotice && (
+              <div
+                style={{
+                  padding: '12px 16px',
+                  background: '#ecfdf5',
+                  border: '1.5px solid #a7f3d0',
+                  borderRadius: '10px',
+                  color: '#047857',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <Check size={18} color="#047857" />
+                <span>{profileNotice}</span>
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <button disabled={saving} type="submit" style={{ flex: 1, padding: '12px' }}>
-                {saving ? 'Submitting…' : editingPending ? 'Update Event Proposal & Profile' : 'Submit for Admin Approval'} <ArrowRight size={16} />
+              <button
+                disabled={saving}
+                type="submit"
+                style={{
+                  flex: 1,
+                  padding: '14px 24px',
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #ec4899 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: '700',
+                  letterSpacing: '0.3px',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 14px rgba(124, 58, 237, 0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  transition: 'all 0.2s ease-in-out',
+                  opacity: saving ? 0.75 : 1,
+                }}
+              >
+                {saving ? 'Submitting Application…' : editingPending ? 'Update Event Proposal & Profile' : 'Submit for Admin Approval'} <ArrowRight size={18} />
               </button>
               {editingPending && (
                 <button
                   type="button"
                   onClick={() => setEditingPending(false)}
-                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '12px 18px', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '14px 18px', borderRadius: 12, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
                 >
                   Cancel
                 </button>
@@ -661,7 +937,298 @@ export default function OrganizePage() {
               </div>
             </div>
           </div>
-        ) : step === 2 ? <div className="org-form-grid"><label>Ticket Name <em>*</em><input value={form.ticketName} onChange={update("ticketName")} required/></label><label>Price (INR) <em>*</em><input type="number" min="0" value={form.price} onChange={update("price")} required/></label><label>Capacity <em>*</em><input type="number" min="1" value={form.capacity} onChange={update("capacity")} required/></label></div> : step === 3 ? <div className="event-media-field"><div className="media-mode"><button type="button" className={imageMode === 'upload' ? 'active' : ''} onClick={() => setImageMode('upload')}>Upload image</button><button type="button" className={imageMode === 'url' ? 'active' : ''} onClick={() => setImageMode('url')}>Use image URL</button></div>{imageMode === 'upload' ? <label className={`event-upload ${uploadingImage ? 'uploading' : ''}`}><Image/><b>{uploadingImage ? 'Uploading to Cloudinary…' : 'Choose event banner'}</b><span>JPG, PNG or WebP · maximum 3 MB</span><input disabled={uploadingImage} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage}/></label> : <label>Public image URL<input type="url" value={form.image} onChange={update("image")} placeholder="https://example.com/event-banner.jpg"/></label>}{imageMode === 'upload' && imageUpload.status !== 'idle' && <div className={`image-upload-status ${imageUpload.status}`} role="status">{imageUpload.status === 'uploading' && <i/>}{imageUpload.status === 'success' && <Check/>}<span><b>{imageUpload.status === 'uploading' ? 'Uploading image…' : imageUpload.status === 'success' ? 'Uploaded successfully to Cloudinary' : 'Upload failed'}</b><small>{imageUpload.status === 'error' ? imageUpload.error : imageUpload.fileName}</small></span></div>}{form.image && <div className="event-image-preview"><img src={form.image} alt="Event banner preview"/><button type="button" onClick={() => { setForm(current => ({ ...current, image:'' })); setImageUpload({ status:'idle', fileName:'', error:'' }); }}>Remove image</button></div>}</div> : <div className="org-step-placeholder"><Check/><h3>Ready for approval</h3><p>Submitting sends this event to the Admin workspace. Customers see it only after approval.</p></div>}
+        ) : step === 2 ? (
+          <div className="org-tickets-builder" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Quick Preset Selector Bar */}
+            <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '16px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Ticket size={18} color="#e11d48" /> Ticket Types &amp; Pricing
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b' }}>
+                    Click any preset button below to add or fix ticket types (VIP, General, VVIP, etc.)
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Quick Add:</span>
+                  {TICKET_PRESETS.map(preset => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      onClick={() => addTicketTier(preset.key)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '6px 12px',
+                        borderRadius: '999px',
+                        border: `1.5px solid ${preset.border}`,
+                        background: preset.bg,
+                        color: preset.color,
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title={`Add a new ${preset.name} tier`}
+                    >
+                      <span>{preset.icon}</span>
+                      <span>+ {preset.label.split('/')[0].trim()}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Informative Hint */}
+              <div style={{ fontSize: '12px', color: '#475569', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                <span>💡 You can offer multiple ticket types (VIP, General, VVIP) with separate prices and capacities.</span>
+                <span style={{ fontWeight: 700, color: '#0f172a' }}>
+                  {tickets.length} {tickets.length === 1 ? 'Tier' : 'Tiers'} Configured · Total Capacity: {tickets.reduce((sum, t) => sum + (Number(t.capacity) || 0), 0)}
+                </span>
+              </div>
+            </div>
+
+            {/* List of Ticket Tiers */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {tickets.map((ticket, index) => {
+                const currentPreset = TICKET_PRESETS.find(p => p.key === ticket.tierKey) || TICKET_PRESETS[0];
+                return (
+                  <div
+                    key={ticket.id}
+                    style={{
+                      background: '#fff',
+                      border: '1.5px solid #e2e8f0',
+                      borderRadius: '14px',
+                      padding: '18px 20px',
+                      boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)',
+                      transition: 'border-color 0.2s ease'
+                    }}
+                  >
+                    {/* Tier Header with Select Buttons */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          background: currentPreset.bg,
+                          color: currentPreset.color,
+                          border: `1.5px solid ${currentPreset.border}`,
+                          fontWeight: 700,
+                          fontSize: '12px'
+                        }}>
+                          {currentPreset.icon} Tier #{index + 1}: {ticket.name || 'Unnamed Tier'}
+                        </span>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
+                          Fix Type:
+                        </span>
+                      </div>
+
+                      {/* Select Buttons to Fix/Switch this Ticket's Tier */}
+                      <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {TICKET_PRESETS.map(preset => {
+                          const isSelected = ticket.tierKey === preset.key;
+                          return (
+                            <button
+                              key={preset.key}
+                              type="button"
+                              onClick={() => applyPresetToTicket(ticket.id, preset.key)}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '5px 12px',
+                                borderRadius: '7px',
+                                border: isSelected ? `2px solid ${preset.color}` : '1px solid #cbd5e1',
+                                background: isSelected ? preset.bg : '#fff',
+                                color: isSelected ? preset.color : '#475569',
+                                fontWeight: isSelected ? 800 : 600,
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <span>{preset.icon}</span>
+                              <span>{preset.label.split('/')[0].trim()}</span>
+                              {isSelected && <span style={{ marginLeft: '3px', fontWeight: 900 }}>✓</span>}
+                            </button>
+                          );
+                        })}
+
+                        {tickets.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeTicketTier(ticket.id)}
+                            style={{
+                              marginLeft: '8px',
+                              padding: '5px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #fecdd3',
+                              background: '#fff1f2',
+                              color: '#e11d48',
+                              fontWeight: 600,
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                            title="Remove this ticket tier"
+                          >
+                            ✕ Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Inputs Grid */}
+                    <div className="org-form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: 600, fontSize: '12px', color: '#334155' }}>
+                        <span>Ticket Name <em>*</em></span>
+                        <input
+                          type="text"
+                          value={ticket.name}
+                          onChange={(e) => updateTicket(ticket.id, 'name', e.target.value)}
+                          placeholder="e.g. VIP Pass, General Admission"
+                          required
+                          style={{
+                            height: '42px',
+                            padding: '0 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            fontSize: '14px',
+                            color: '#0f172a'
+                          }}
+                        />
+                      </label>
+
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: 600, fontSize: '12px', color: '#334155' }}>
+                        <span>Price (INR) <em>*</em></span>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <span style={{ position: 'absolute', left: '12px', color: '#64748b', fontWeight: 700, fontSize: '14px' }}>₹</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={ticket.price}
+                            onChange={(e) => updateTicket(ticket.id, 'price', e.target.value)}
+                            placeholder="0"
+                            required
+                            style={{
+                              width: '100%',
+                              height: '42px',
+                              padding: '0 12px 0 28px',
+                              borderRadius: '8px',
+                              border: '1px solid #cbd5e1',
+                              fontSize: '14px',
+                              color: '#0f172a',
+                              fontWeight: 600
+                            }}
+                          />
+                        </div>
+                      </label>
+
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: 600, fontSize: '12px', color: '#334155' }}>
+                        <span>Capacity (Tickets) <em>*</em></span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={ticket.capacity}
+                          onChange={(e) => updateTicket(ticket.id, 'capacity', e.target.value)}
+                          placeholder="100"
+                          required
+                          style={{
+                            height: '42px',
+                            padding: '0 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            fontSize: '14px',
+                            color: '#0f172a',
+                            fontWeight: 600
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    {/* Tier Perk Note */}
+                    {currentPreset.perk && (
+                      <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{currentPreset.icon}</span>
+                        <span><em>Suggestion:</em> {currentPreset.perk}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom Add Tier Button Bar */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', background: '#fdf4f5', border: '1px dashed #f43f5e', borderRadius: '12px', padding: '14px 18px' }}>
+              <div>
+                <span style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a' }}>Need more ticket categories?</span>
+                <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#64748b' }}>Add VIP, VVIP, or General tiers so your attendees have options.</p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => addTicketTier('vip')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #d97706',
+                    background: '#fffbeb',
+                    color: '#b45309',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  👑 + Add VIP Ticket
+                </button>
+                <button
+                  type="button"
+                  onClick={() => addTicketTier('vvip')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #be185d',
+                    background: '#fdf2f8',
+                    color: '#9d174d',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  💎 + Add VVIP Ticket
+                </button>
+                <button
+                  type="button"
+                  onClick={() => addTicketTier('general')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #0284c7',
+                    background: '#f0f9ff',
+                    color: '#0369a1',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  ⭐ + Add General Ticket
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : step === 3 ? <div className="event-media-field"><div className="media-mode"><button type="button" className={imageMode === 'upload' ? 'active' : ''} onClick={() => setImageMode('upload')}>Upload image</button><button type="button" className={imageMode === 'url' ? 'active' : ''} onClick={() => setImageMode('url')}>Use image URL</button></div>{imageMode === 'upload' ? <label className={`event-upload ${uploadingImage ? 'uploading' : ''}`}><Image/><b>{uploadingImage ? 'Uploading to Cloudinary…' : 'Choose event banner'}</b><span>JPG, PNG or WebP · maximum 3 MB</span><input disabled={uploadingImage} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage}/></label> : <label>Public image URL<input type="url" value={form.image} onChange={update("image")} placeholder="https://example.com/event-banner.jpg"/></label>}{imageMode === 'upload' && imageUpload.status !== 'idle' && <div className={`image-upload-status ${imageUpload.status}`} role="status">{imageUpload.status === 'uploading' && <i/>}{imageUpload.status === 'success' && <Check/>}<span><b>{imageUpload.status === 'uploading' ? 'Uploading image…' : imageUpload.status === 'success' ? 'Uploaded successfully to Cloudinary' : 'Upload failed'}</b><small>{imageUpload.status === 'error' ? imageUpload.error : imageUpload.fileName}</small></span></div>}{form.image && <div className="event-image-preview"><img src={form.image} alt="Event banner preview"/><button type="button" onClick={() => { setForm(current => ({ ...current, image:'' })); setImageUpload({ status:'idle', fileName:'', error:'' }); }}>Remove image</button></div>}</div> : <div className="org-step-placeholder"><Check/><h3>Ready for approval</h3><p>Submitting sends this event to the Admin workspace. Customers see it only after approval.</p></div>}
         <div className="org-form-actions"><button type="button" className="draft" disabled={saving || uploadingImage} onClick={() => saveEvent(false)}>Save as Draft</button><button disabled={saving || uploadingImage} type={step === 4 ? "submit" : "button"} onClick={(event) => step < 4 && event.currentTarget.form.reportValidity() && setStep(step + 1)}>{saving ? "Saving..." : step === 4 ? "Submit Event" : "Next Step"} <ArrowRight/></button></div>
         {notice && <div className={`org-saved ${/required|failed|error|expired|cannot|invalid/i.test(notice) ? 'error' : ''}`}><Check/> {notice}</div>}
       </form>

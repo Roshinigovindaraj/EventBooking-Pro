@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
 import { apiRequest } from "../../services/apiClient.js";
+import { isItemWishlisted, toggleWishlistItem } from "../../services/wishlistService.js";
+import { fireConfettiCelebration, fireButtonPopper } from "../../components/CelebrationPoppers.jsx";
 import {
   ArrowRight,
   Bell,
@@ -36,10 +38,16 @@ import {
 
 const categories = [
   ["All Events", Sparkles],
-  ["Concerts", Music2],
-  ["Parties", Users],
-  ["Business Events", BriefcaseBusiness],
   ["Sports", Trophy],
+  ["Education", Ticket],
+  ["Business", BriefcaseBusiness],
+  ["Family & Kids", Users],
+  ["Food & Lifestyle", Sparkles],
+  ["Cultural", Sparkles],
+  ["Parties", Users],
+  ["Entertainment", Music2],
+  ["Concerts", Music2],
+  ["Business Events", BriefcaseBusiness],
   ["Festivals", Sparkles],
   ["Workshops", Ticket],
   ["Exhibitions", Store],
@@ -66,20 +74,31 @@ export const publicEvent = (event, index = 0) => {
     month: isValidDate(start) ? start.toLocaleString("en-IN", { month: "short" }).toUpperCase() : "EVENT",
     title: event.title || "Untitled Event",
     artist: event.organizer?.name || "",
+    category: event.category || "Events",
+    subcategory: event.subcategory || "",
     type: event.subcategory || event.category || "Events",
     venue: event.venueName || event.location?.address || "Venue to be announced",
+    address: event.location?.address || "",
     time: isValidDate(start) ? `${formatTime(start)} - ${formatTime(end)}` : "Time to be announced",
     price: `₹ ${(prices.length ? Math.min(...prices) : 0).toLocaleString("en-IN")}`,
     city: event.location?.city || "",
     priceValue: prices.length ? Math.min(...prices) : 0,
     startsAt: event.startsAt,
+    endsAt: event.endsAt,
     mode: "In-Person Events",
+    ticketTypes: event.ticketTypes || [],
     capacity,
+    totalCapacity: capacity,
     used,
+    totalSold: used,
+    sold: used,
     remainingTickets,
     isSoldOut,
+    isCompleted: Boolean(event.isCompleted || (event.endsAt && new Date(event.endsAt) <= new Date())),
     availability: isSoldOut ? "Sold Out" : "Available Tickets",
     recommendation: 100 - index,
+    description: event.description || "",
+    raw: event,
   };
 };
 
@@ -120,6 +139,38 @@ const matchesDateSelection = (startsAt, selection, now = new Date()) => {
   }
   return true;
 };
+
+const isEventCategoryMatch = (selectedCat, ev) => {
+  if (!selectedCat || selectedCat === "All Events") return true;
+  const target = selectedCat.toLowerCase().trim();
+  const cat = String(ev.category || "").toLowerCase();
+  const sub = String(ev.subcategory || "").toLowerCase();
+  const type = String(ev.type || "").toLowerCase();
+
+  if (target.includes("concert") || target.includes("music")) {
+    return cat.includes("entertainment") || cat.includes("music") || sub.includes("concert") || sub.includes("music") || sub.includes("dj") || type.includes("concert") || type.includes("music");
+  }
+  if (target.includes("part")) {
+    return cat.includes("part") || sub.includes("party") || sub.includes("dj") || type.includes("party");
+  }
+  if (target.includes("business")) {
+    return cat.includes("business") || sub.includes("networking") || sub.includes("meetup") || sub.includes("conference") || sub.includes("exhibition") || type.includes("business") || type.includes("networking");
+  }
+  if (target.includes("sport")) {
+    return cat.includes("sport") || sub.includes("cricket") || sub.includes("football") || sub.includes("marathon") || type.includes("sport");
+  }
+  if (target.includes("festival")) {
+    return cat.includes("festival") || cat.includes("cultural") || cat.includes("food") || sub.includes("festival") || type.includes("festival");
+  }
+  if (target.includes("workshop")) {
+    return cat.includes("education") || cat.includes("workshop") || sub.includes("workshop") || sub.includes("training") || sub.includes("seminar") || type.includes("workshop");
+  }
+  if (target.includes("exhibition")) {
+    return cat.includes("business") || cat.includes("exhibition") || sub.includes("exhibition") || sub.includes("trade") || type.includes("exhibition");
+  }
+  return cat.includes(target) || sub.includes(target) || type.includes(target) || target.includes(cat) || target.includes(type);
+};
+
 const filterGroups = [
   {
     title: "Event Category",
@@ -157,8 +208,16 @@ export function Topbar({ home = false, active = home ? "home" : "events" }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const signOut = async () => { await logout(); setAccountOpen(false); navigate("/"); };
+
+  const handleNavbarClick = (e) => {
+    const clickable = e.target.closest("button, a, [role='button']");
+    if (clickable) {
+      fireButtonPopper(e);
+    }
+  };
+
   return (
-    <header className="evx-topbar">
+    <header className="evx-topbar" onClickCapture={handleNavbarClick}>
       <Logo />
       <button
         className="evx-menu"
@@ -177,13 +236,13 @@ export function Topbar({ home = false, active = home ? "home" : "events" }) {
         <Link className={active === "list" ? "active" : ""} to="/list-venue" onClick={() => setOpen(false)}><Store/><span>List Your Venue</span></Link>
       </nav>
       <div className="evx-account">
-        {user ? <div className="evx-user-menu"><button type="button" className="evx-user-trigger" onClick={() => setAccountOpen((value) => !value)} aria-expanded={accountOpen}><span className="evx-user-avatar">{user.name?.charAt(0).toUpperCase() || "U"}</span><span><b>{user.name}</b></span><ChevronDown/></button>{accountOpen&&<div className="evx-user-dropdown"><div><CircleUserRound/><span><b>{user.name}</b><small>{user.email}</small></span></div><Link to="/dashboard" onClick={() => setAccountOpen(false)}><LayoutDashboard/> My Dashboard</Link><button type="button" onClick={signOut}><LogOut/> Logout</button></div>}</div> : <><Link to="/auth/login">Login</Link><Link className="signup" to="/auth/register">Sign Up <ArrowRight/></Link></>}
+        {user ? <div className="evx-user-menu"><button type="button" className="evx-user-trigger" onClick={() => setAccountOpen((value) => !value)} aria-expanded={accountOpen}><span className="evx-user-avatar">{user.name?.charAt(0).toUpperCase() || "U"}</span><span><b>{user.name}</b></span><ChevronDown/></button>{accountOpen&&<div className="evx-user-dropdown"><div><CircleUserRound/><span><b>{user.name}</b><small>{user.email}</small></span></div><Link to="/dashboard" onClick={() => setAccountOpen(false)}><LayoutDashboard/> My Dashboard</Link><Link to="/dashboard#wishlist" onClick={() => setAccountOpen(false)}><Heart/> My Wishlist</Link><button type="button" onClick={signOut}><LogOut/> Logout</button></div>}</div> : <><Link to="/auth/login">Login</Link><Link className="signup" to="/auth/register">Sign Up <ArrowRight/></Link></>}
       </div>
     </header>
   );
 }
 function Filters({ selected, toggle, clear }) {
-  const [maxPrice, setMaxPrice] = React.useState(1500);
+  const [maxPrice, setMaxPrice] = React.useState(50000);
   const apply = () =>
     window.dispatchEvent(
       new CustomEvent("eventoria:apply-filters", {
@@ -191,7 +250,7 @@ function Filters({ selected, toggle, clear }) {
       }),
     );
   const reset = () => {
-    setMaxPrice(1500);
+    setMaxPrice(50000);
     clear();
   };
   return (
@@ -239,8 +298,8 @@ function Filters({ selected, toggle, clear }) {
         <input
           type="range"
           min="0"
-          max="1500"
-          step="50"
+          max="50000"
+          step="500"
           value={maxPrice}
           onChange={(event) => setMaxPrice(Number(event.target.value))}
           aria-label="Maximum event price"
@@ -258,16 +317,32 @@ function Filters({ selected, toggle, clear }) {
 }
 function EventCard({ event, index, onView }) {
   const { user } = useAuth();
-  const owner = encodeURIComponent(user?._id || user?.id || user?.email?.toLowerCase() || "guest");
-  const storageKey = `eventoria:wishlist:${owner}:event:${event.id}`;
-  const [liked, setLiked] = React.useState(() => Boolean(localStorage.getItem(storageKey)));
-  React.useEffect(() => setLiked(Boolean(localStorage.getItem(storageKey))), [storageKey]);
-  const toggleLiked = () => setLiked((current) => {
-    const next = !current;
-    if (next) localStorage.setItem(storageKey, JSON.stringify(event));
-    else localStorage.removeItem(storageKey);
-    return next;
-  });
+  const navigate = useNavigate();
+  const [liked, setLiked] = React.useState(() => isItemWishlisted("event", event.id, user));
+  React.useEffect(() => {
+    setLiked(isItemWishlisted("event", event.id, user));
+    const onWishlistChanged = (evt) => {
+      if (evt.detail?.kind === "event" && String(evt.detail?.id) === String(event.id)) {
+        setLiked(evt.detail.liked);
+      }
+    };
+    window.addEventListener("eventoria:wishlist-updated", onWishlistChanged);
+    return () => window.removeEventListener("eventoria:wishlist-updated", onWishlistChanged);
+  }, [event.id, user]);
+
+  const toggleLiked = (e) => {
+    e.stopPropagation();
+    if (!user) {
+      navigate("/auth/login", {
+        state: {
+          from: "/discover",
+          notice: "Please log in to save events to your wishlist.",
+        },
+      });
+      return;
+    }
+    toggleWishlistItem("event", event, user).then((next) => setLiked(next));
+  };
   return (
     <article className="evx-card">
       <div className="evx-card-photo">
@@ -275,7 +350,7 @@ function EventCard({ event, index, onView }) {
         <button
           className={liked ? "liked" : ""}
           onClick={toggleLiked}
-          aria-label="Save event"
+          aria-label={`Save ${event.title}`}
         >
           <Heart fill={liked ? "currentColor" : "none"} />
         </button>
@@ -328,11 +403,11 @@ export default function CatalogPage() {
   const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") || "";
   const requestedCategory = searchParams.get("category");
-  const initialCategory = categories.some(
-    ([name]) => name === requestedCategory,
+  const initialCategory = requestedCategory && categories.some(
+    ([name]) => name.toLowerCase() === requestedCategory.toLowerCase(),
   )
-    ? requestedCategory
-    : "All Events";
+    ? (categories.find(([name]) => name.toLowerCase() === requestedCategory.toLowerCase())?.[0] || requestedCategory)
+    : (requestedCategory || "All Events");
   const [category, setCategory] = React.useState(initialCategory);
   const [selected, setSelected] = React.useState({
     Date: [],
@@ -346,10 +421,10 @@ export default function CatalogPage() {
     "Event Type": [],
     Availability: [],
   });
-  const [appliedMaxPrice, setAppliedMaxPrice] = React.useState(1500);
+  const [appliedMaxPrice, setAppliedMaxPrice] = React.useState(50000);
   const [query, setQuery] = React.useState(initialQuery);
   const [queryDraft, setQueryDraft] = React.useState(initialQuery);
-  const [locationDraft, setLocationDraft] = React.useState("Salem");
+  const [locationDraft, setLocationDraft] = React.useState("All locations");
   const [dateDraft, setDateDraft] = React.useState("Any date");
   const [appliedLocation, setAppliedLocation] = React.useState("All locations");
   const [appliedDate, setAppliedDate] = React.useState("Any date");
@@ -436,6 +511,12 @@ export default function CatalogPage() {
         .map((event) => toDateValue(new Date(event.startsAt))),
     );
   }, [catalogEvents, category, locationDraft, queryDraft]);
+
+  const availableEventLocations = React.useMemo(() => {
+    const list = new Set(["All locations"]);
+    catalogEvents.forEach((e) => { if (e.city) list.add(e.city); });
+    return Array.from(list);
+  }, [catalogEvents]);
   const selectCalendarDate = (date) => {
     const value = toDateValue(date);
     setDateDraft(value);
@@ -489,16 +570,17 @@ export default function CatalogPage() {
   const filtered = catalogEvents.filter((event) => {
     const matchesSearch =
       !query ||
-      `${event.title} ${event.artist || ""} ${event.type} ${event.venue}`
+      `${event.title} ${event.artist || ""} ${event.type} ${event.venue} ${event.category || ""}`
         .toLowerCase()
         .includes(query.trim().toLowerCase());
     const matchesTopCategory =
-      category === "All Events" || event.type === category;
+      category === "All Events" || isEventCategoryMatch(category, event);
     const matchesLocation =
-      appliedLocation === "All locations" || event.city === appliedLocation;
+      appliedLocation === "All locations" ||
+      String(event.city || "").toLowerCase() === appliedLocation.toLowerCase();
     const matchesCategory =
       !applied["Event Category"].length ||
-      applied["Event Category"].includes(event.type);
+      applied["Event Category"].some((cat) => isEventCategoryMatch(cat, event));
     const matchesDate =
       matchesDateSelection(event.startsAt, appliedDate) &&
       (!applied.Date.length ||
@@ -619,7 +701,7 @@ export default function CatalogPage() {
           </button>
           {openDropdown === "location" && (
             <div className="evx-search-menu" role="listbox" aria-label="Location">
-              {["All locations", "Salem", "Chennai", "Bengaluru", "Coimbatore"].map(
+              {availableEventLocations.map(
                 (location) => (
                   <button
                     type="button"
@@ -743,7 +825,12 @@ export default function CatalogPage() {
           <button
             key={name}
             className={category === name ? "active" : ""}
-            onClick={() => setCategory(name)}
+            onClick={() => {
+              setCategory(name);
+              if (name !== "All Events") {
+                fireConfettiCelebration();
+              }
+            }}
           >
             <span>
               <Icon />
@@ -817,7 +904,7 @@ export default function CatalogPage() {
           )}
         </section>
       </main>
-      {selectedEvent && <div className="guest-modal" role="dialog" aria-modal="true" aria-label={`${selectedEvent.title} details`} onClick={(event) => event.target === event.currentTarget && setSelectedEvent(null)}><article><button className="guest-modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close details">×</button><img src={selectedEvent.image} alt={selectedEvent.title}/><div className="guest-modal-copy"><span className="guest-type">{selectedEvent.type}</span><h2>{selectedEvent.title}</h2><p><CalendarDays/> {selectedEvent.day} {selectedEvent.month} {new Date(selectedEvent.startsAt).getFullYear()} · {selectedEvent.time}</p><p><MapPin/> {selectedEvent.venue}, {selectedEvent.city}, Tamil Nadu</p><div className="guest-facts"><span><b>{selectedEvent.price}</b> onwards</span><span><b>{selectedEvent.remainingTickets !== undefined ? `${selectedEvent.remainingTickets} of ${selectedEvent.capacity} remaining` : selectedEvent.availability}</b></span><span><b>{selectedEvent.mode}</b> event</span></div><p className="guest-description">Enjoy a verified Eventoria experience with complete venue information, secure ticketing and clear event details.</p><div className="guest-actions"><button onClick={() => shareItem(selectedEvent)}><Share2/> Share</button><button onClick={() => compareItem(selectedEvent)}><GitCompareArrows/> Compare</button><a target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${selectedEvent.venue}, ${selectedEvent.city}`)}`}><ExternalLink/> Map</a></div><div className="guest-reviews"><b>Guest reviews</b><span>★ 4.8 · “Clear details and a smooth booking experience.”</span></div>{guestNotice&&<small className="guest-notice">{guestNotice}</small>}<button className="guest-book" onClick={() => bookItem(selectedEvent)}>Book Now <small>{user ? "Continue to booking" : "Login required"}</small><ArrowRight/></button></div></article></div>}
+      {selectedEvent && <div className="guest-modal" role="dialog" aria-modal="true" aria-label={`${selectedEvent.title} details`} onClick={(event) => event.target === event.currentTarget && setSelectedEvent(null)}><article><button className="guest-modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close details">×</button><img src={selectedEvent.image} alt={selectedEvent.title}/><div className="guest-modal-copy"><span className="guest-type">{selectedEvent.type}</span><h2>{selectedEvent.title}</h2><p><CalendarDays/> {selectedEvent.day} {selectedEvent.month} {new Date(selectedEvent.startsAt).getFullYear()} · {selectedEvent.time}</p><p><MapPin/> {selectedEvent.venue}, {selectedEvent.city}, Tamil Nadu</p><div className="guest-facts"><span><b>{selectedEvent.price}</b> onwards</span><span><b>{selectedEvent.remainingTickets !== undefined ? `${selectedEvent.remainingTickets} of ${selectedEvent.capacity} remaining` : selectedEvent.availability}</b></span><span><b>{selectedEvent.mode}</b> event</span></div><p className="guest-description">Enjoy a verified Eventoria experience with complete venue information, secure ticketing and clear event details.</p><div className="guest-actions"><button onClick={() => shareItem(selectedEvent)}><Share2/> Share</button><button onClick={() => compareItem(selectedEvent)}><GitCompareArrows/> Compare</button><a target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${selectedEvent.venue}, ${selectedEvent.city}`)}`}><ExternalLink/> Map</a></div><div className="guest-reviews"><b>Guest reviews</b><span>★ 4.8 · “Clear details and a smooth booking experience.”</span></div>{guestNotice&&<small className="guest-notice">{guestNotice}</small>}{(selectedEvent.isSoldOut || (selectedEvent.remainingTickets !== undefined && selectedEvent.remainingTickets <= 0)) ? <button className="guest-book" disabled style={{ background: '#94a3b8', cursor: 'not-allowed', opacity: 0.8 }}>Sold Out <small>All tickets booked</small></button> : <button className="guest-book" onClick={() => bookItem(selectedEvent)}>Book Now <small>{user ? "Continue to booking" : "Login required"}</small><ArrowRight/></button>}</div></article></div>}
       <section className="evx-news">
         <div>
           <small>Stay Updated</small>

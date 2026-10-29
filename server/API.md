@@ -66,9 +66,12 @@ For local/development role testing, run `npm run seed:roles` inside `server`. Th
 
 - `GET|POST /organizer/events`
 - `PATCH /organizer/events/:id`
+- `DELETE /organizer/events/:id` — delete event (allowed for creator organizer or admin)
 - `POST /organizer/events/:id/submit`
 - `GET /organizer/bookings`
 - `GET|POST /venue-owner/venues`
+- `PATCH /venue-owner/venues/:id`
+- `DELETE /venue-owner/venues/:id` — delete venue (allowed for creator venue owner or admin)
 - `POST /venue-owner/venues/:id/submit`
 - `GET /venue-owner/reservations`
 
@@ -80,6 +83,10 @@ For local/development role testing, run `npm run seed:roles` inside `server`. Th
 - `PATCH /venue-staff/tasks/:id`
 - `GET /admin/applications`
 - `POST /admin/applications/:id/review`
+- `GET /admin/events`
+- `DELETE /admin/events/:id` — delete event from platform
+- `GET /admin/venues`
+- `DELETE /admin/venues/:id` — delete venue from platform
 - `POST /admin/events/:id/review`
 - `POST /admin/venues/:id/review`
 - `GET /admin/users`

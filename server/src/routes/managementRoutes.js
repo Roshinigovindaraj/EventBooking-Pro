@@ -10,6 +10,8 @@ import { User } from '../models/User.js';
 import { StaffAssignment } from '../models/StaffAssignment.js';
 import { VenueReservation } from '../models/VenueReservation.js';
 import { OperationalTask } from '../models/OperationalTask.js';
+import { AuditLog } from '../models/AuditLog.js';
+import { Wishlist } from '../models/Wishlist.js';
 import { AppError, notFound } from '../utils/errors.js';
 import { CATEGORY_NAMES, EVENT_CATEGORIES } from '../config/eventCategories.js';
 
@@ -24,7 +26,44 @@ const eventBody = eventFields.superRefine(validateCategoryPair);
 const eventUpdateBody = eventFields.partial().superRefine(validateCategoryPair);
 router.get('/organizer/events', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => { try { const filter = req.user.roles.some(r => ['admin','super_admin'].includes(r)) ? {} : { organizer: req.user.id }; res.json({ items: await Event.find(filter).populate('organizer', 'name email').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 router.post('/organizer/events', authorize('event_organizer'), validate(z.object({ body: eventBody })), async (req, res, next) => { try { const { city, address, ...body } = req.body; if (new Date(body.endsAt) <= new Date(body.startsAt)) throw new AppError(422, 'INVALID_DATES', 'Event end must be after its start'); const base = slugify(body.title); const slug = `${base}-${Date.now().toString(36)}`; res.status(201).json({ event: await Event.create({ ...body, location: { city, address }, slug, organizer: req.user.id }) }); } catch (e) { next(e); } });
-router.patch('/organizer/events/:id', authorize('event_organizer'), validate(z.object({ body: eventUpdateBody })), async (req, res, next) => { try { const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id, status: { $in: ['draft', 'rejected', 'published'] } }); if (!event) throw notFound('Editable event not found'); const { city, address, ...body } = req.body; Object.assign(event, body); if (city || address !== undefined) event.location = { city: city || event.location.city, address: address ?? event.location.address }; await event.save(); res.json({ event }); } catch (e) { next(e); } });
+router.patch('/organizer/events/:id', authorize('event_organizer', 'admin', 'super_admin'), validate(z.object({ body: eventUpdateBody })), async (req, res, next) => { try { const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r)); const filter = isPrivileged ? { _id: req.params.id } : { _id: req.params.id, organizer: req.user.id }; const event = await Event.findOne(filter); if (!event) throw notFound('Editable event not found'); const { city, address, ...body } = req.body; Object.assign(event, body); if (city || address !== undefined) event.location = { city: city || event.location.city, address: address ?? event.location.address }; await event.save(); res.json({ event }); } catch (e) { next(e); } });
+router.delete('/organizer/events/:id', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const event = await Event.findById(req.params.id);
+    if (!event) throw notFound('Event not found');
+
+    if (!isPrivileged && String(event.organizer) !== String(req.user.id)) {
+      throw new AppError(403, 'FORBIDDEN', 'You do not have permission to delete this event.');
+    }
+
+    await Event.deleteOne({ _id: event._id });
+    await StaffAssignment.deleteMany({ event: event._id });
+    await Wishlist.deleteMany({ item: event._id, itemModel: 'Event' });
+
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'event.deleted',
+        resourceType: 'Event',
+        resourceId: event._id,
+        metadata: {
+          title: event.title,
+          deletedBy: isPrivileged ? 'admin' : 'organizer'
+        }
+      });
+    } catch (logErr) {
+      console.error('AuditLog error:', logErr);
+    }
+
+    res.json({
+      success: true,
+      message: `Event "${event.title}" has been successfully deleted.`
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 router.post('/organizer/events/:id/submit', authorize('event_organizer'), async (req, res, next) => { try { const event = await Event.findOneAndUpdate({ _id: req.params.id, organizer: req.user.id, status: { $in: ['draft', 'rejected'] } }, { status: 'pending_review', approvalFeedback: null }, { new: true }); if (!event) throw notFound('Submittable event not found'); res.json({ event }); } catch (e) { next(e); } });
 router.get('/organizer/bookings', authorize('event_organizer'), async (req, res, next) => { try { const ids = await Event.find({ organizer: req.user.id }).distinct('_id'); const filter = { event: { $in: ids } }; if (req.query.eventId) filter.event = req.query.eventId; if (req.query.status) filter.status = req.query.status; res.json({ items: await Booking.find(filter).populate('event', 'title startsAt').populate('customer', 'name email').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 router.get('/organizer/events/:id/attendees', authorize('event_organizer'), async (req, res, next) => { try { const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id }); if (!event) throw notFound('Event not found'); const items = await Ticket.find({ event: event.id }).populate('owner', 'name email').populate('booking', 'bookingReference quantity status paymentStatus').sort({ createdAt: -1 }); res.json({ items }); } catch (e) { next(e); } });
@@ -85,6 +124,63 @@ router.post('/venue-owner/venues/:id/submit', authorize('venue_owner', 'admin', 
     if (!venue) throw notFound('Submittable venue not found');
     res.json({ venue });
   } catch (e) { next(e); }
+});
+router.patch('/venue-owner/venues/:id', authorize('venue_owner', 'admin', 'super_admin'), validate(z.object({ body: venueBody.partial() })), async (req, res, next) => {
+  try {
+    const isPlatformAdmin = req.user.roles?.some(r => ['admin', 'super_admin'].includes(r));
+    const filter = isPlatformAdmin ? { _id: req.params.id } : { _id: req.params.id, owner: req.user.id };
+    const venue = await Venue.findOne(filter);
+    if (!venue) throw notFound('Venue not found');
+    const { city, address, ...body } = req.body;
+    Object.assign(venue, body);
+    if (city !== undefined || address !== undefined) {
+      venue.location = {
+        city: city !== undefined ? city : venue.location?.city,
+        address: address !== undefined ? address : venue.location?.address
+      };
+    }
+    await venue.save();
+    res.json({ venue });
+  } catch (e) { next(e); }
+});
+router.delete('/venue-owner/venues/:id', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const venue = await Venue.findById(req.params.id);
+    if (!venue) throw notFound('Venue not found');
+
+    if (!isPrivileged && String(venue.owner) !== String(req.user.id)) {
+      throw new AppError(403, 'FORBIDDEN', 'You do not have permission to delete this venue.');
+    }
+
+    await Venue.deleteOne({ _id: venue._id });
+    await VenueReservation.deleteMany({ venue: venue._id });
+    await OperationalTask.deleteMany({ venue: venue._id });
+    await Wishlist.deleteMany({ item: venue._id, itemModel: 'Venue' });
+    await Event.updateMany({ venue: venue._id }, { $unset: { venue: 1 } });
+
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'venue.deleted',
+        resourceType: 'Venue',
+        resourceId: venue._id,
+        metadata: {
+          name: venue.name,
+          deletedBy: isPrivileged ? 'admin' : 'venue_owner'
+        }
+      });
+    } catch (logErr) {
+      console.error('AuditLog error:', logErr);
+    }
+
+    res.json({
+      success: true,
+      message: `Venue "${venue.name}" has been successfully deleted.`
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 router.get('/venue-owner/reservations', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => {
   try {

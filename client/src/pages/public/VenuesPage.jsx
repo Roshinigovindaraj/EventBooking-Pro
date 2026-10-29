@@ -23,8 +23,10 @@ import {
   Users,
 } from "lucide-react";
 import { Topbar } from "./CatalogPage.jsx";
+import { isItemWishlisted, toggleWishlistItem } from "../../services/wishlistService.js";
 import SiteFooter from "../../components/SiteFooter.jsx";
 import { apiRequest } from "../../services/apiClient.js";
+import CelebrationPoppers, { fireConfettiCelebration } from "../../components/CelebrationPoppers.jsx";
 
 const venueData = [];
 export { venueData };
@@ -34,12 +36,16 @@ export const publicVenue = (venue) => ({
   id: venue._id,
   type: venue.type,
   city: venue.location?.city || venue.city || "",
+  address: venue.location?.address || venue.address || "",
   guests: `Up to ${Number(venue.capacity || 0).toLocaleString("en-IN")}`,
   capacity: venue.capacity || 0,
   price: Math.round((venue.priceMinorPerHour || 0) / 100),
   rating: "New",
   reviews: "0",
   image: venue.images?.[0] || "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=900&q=85",
+  amenities: Array.isArray(venue.amenities) ? venue.amenities : [],
+  description: venue.description || "",
+  raw: venue,
 });
 
 const types = [
@@ -55,21 +61,39 @@ const types = [
 
 function VenueCard({ venue, onView }) {
   const { user } = useAuth();
-  const owner = encodeURIComponent(user?._id || user?.id || user?.email?.toLowerCase() || "guest");
-  const storageKey = `eventoria:wishlist:${owner}:venue:${venue.id || venue.name}`;
-  const [liked, setLiked] = React.useState(() => Boolean(localStorage.getItem(storageKey)));
-  React.useEffect(() => setLiked(Boolean(localStorage.getItem(storageKey))), [storageKey]);
-  const toggleLiked = () => setLiked((current) => {
-    const next = !current;
-    if (next) localStorage.setItem(storageKey, JSON.stringify(venue));
-    else localStorage.removeItem(storageKey);
-    return next;
-  });
+  const navigate = useNavigate();
+  const venueId = venue.id || venue.name;
+  const [liked, setLiked] = React.useState(() => isItemWishlisted("venue", venueId, user));
+  React.useEffect(() => {
+    setLiked(isItemWishlisted("venue", venueId, user));
+    const onWishlistChanged = (evt) => {
+      if (evt.detail?.kind === "venue" && String(evt.detail?.id) === String(venueId)) {
+        setLiked(evt.detail.liked);
+      }
+    };
+    window.addEventListener("eventoria:wishlist-updated", onWishlistChanged);
+    return () => window.removeEventListener("eventoria:wishlist-updated", onWishlistChanged);
+  }, [venueId, user]);
+
+  const toggleLiked = (e) => {
+    e.stopPropagation();
+    if (!user) {
+      navigate("/auth/login", {
+        state: {
+          from: "/venues",
+          notice: "Please log in to save venues to your wishlist.",
+        },
+      });
+      return;
+    }
+    toggleWishlistItem("venue", venue, user).then((next) => setLiked(next));
+  };
   return (
     <article className="vn-card">
       <div className="vn-photo">
         <img src={venue.image} alt={venue.name} />
         <button
+          className={liked ? "liked" : ""}
           onClick={toggleLiked}
           aria-label={`Save ${venue.name}`}
         >
@@ -144,11 +168,11 @@ export default function VenuesPage() {
           .includes(query.toLowerCase())) &&
       (type === "All Venues" || v.type === type) &&
       (!selectedTypes.length || selectedTypes.includes(v.type)) &&
-      (location === "All locations" || v.city === location) &&
+      (location === "All locations" || String(v.city || "").toLowerCase() === location.toLowerCase()) &&
       v.capacity <= capacity &&
       v.price <= maxPrice,
   );
-  const pageSize = 3;
+  const pageSize = 6;
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown = filtered.slice((page - 1) * pageSize, page * pageSize);
   React.useEffect(
@@ -172,7 +196,7 @@ export default function VenuesPage() {
     setPage(1);
   };
   const availableLocations = React.useMemo(() => {
-    const list = new Set(["All locations", "Salem", "Chennai", "Tiruchirappalli", "Yercaud", "Coimbatore"]);
+    const list = new Set(["All locations"]);
     catalogVenues.forEach((v) => { if (v.city) list.add(v.city); });
     return Array.from(list);
   }, [catalogVenues]);
@@ -679,7 +703,8 @@ export default function VenuesPage() {
             </button>
 
             {bookingState.success ? (
-              <div style={{ textAlign: "center", padding: "16px 8px" }}>
+              <div style={{ textAlign: "center", padding: "16px 8px", position: "relative", overflow: "visible" }}>
+                <CelebrationPoppers top="8px" left="-14px" right="-14px" />
                 <div style={{ width: 60, height: 60, borderRadius: "50%", background: "#eff8ff", color: "#175cd3", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
                   <Clock size={32} />
                 </div>

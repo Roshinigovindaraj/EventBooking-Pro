@@ -23,8 +23,11 @@ import {
   X,
   XCircle,
   AlertTriangle,
+  Edit2,
+  Save,
 } from 'lucide-react';
 import { apiRequest } from '../services/apiClient.js';
+import { fireConfettiCelebration } from '../components/CelebrationPoppers.jsx';
 
 const money = (minor) =>
   new Intl.NumberFormat('en-IN', {
@@ -68,6 +71,63 @@ export default function VenueOwnerPortalPage({ user }) {
     reservation: null,
     notes: '',
   });
+
+  // Edit venue modal state
+  const [editingVenue, setEditingVenue] = React.useState(null);
+  const [venueEditForm, setVenueEditForm] = React.useState({});
+  const [venueSaving, setVenueSaving] = React.useState(false);
+  const [venueEditError, setVenueEditError] = React.useState('');
+
+  const handleStartEditVenue = (v) => {
+    setVenueEditForm({
+      name: v.name || '',
+      type: v.type || 'Banquet Halls',
+      city: v.location?.city || v.city || '',
+      address: v.location?.address || v.address || '',
+      capacity: v.capacity ? String(v.capacity) : '200',
+      price: v.priceMinorPerHour ? String(Math.round(v.priceMinorPerHour / 100)) : '10000',
+      amenities: Array.isArray(v.amenities) ? v.amenities.join(', ') : (v.amenities || ''),
+      description: v.description || '',
+    });
+    setVenueEditError('');
+    setEditingVenue(v);
+  };
+
+  const handleSaveVenueEdit = async (e) => {
+    e.preventDefault();
+    if (!venueEditForm.name?.trim()) return setVenueEditError('Venue name is required.');
+    if (!venueEditForm.city?.trim()) return setVenueEditError('City is required.');
+    if (!venueEditForm.capacity || Number(venueEditForm.capacity) <= 0) return setVenueEditError('Enter a valid guest capacity.');
+    if (!venueEditForm.price || Number(venueEditForm.price) < 0) return setVenueEditError('Enter a valid price per hour.');
+    if ((venueEditForm.description?.trim().length || 0) < 5) return setVenueEditError('Description must be at least 5 characters.');
+
+    setVenueSaving(true);
+    setVenueEditError('');
+    try {
+      const payload = {
+        name: venueEditForm.name.trim(),
+        type: venueEditForm.type,
+        city: venueEditForm.city.trim(),
+        address: venueEditForm.address?.trim() || '',
+        capacity: Number(venueEditForm.capacity),
+        priceMinorPerHour: Math.round(Number(venueEditForm.price) * 100),
+        amenities: venueEditForm.amenities ? venueEditForm.amenities.split(',').map(s => s.trim()).filter(Boolean) : [],
+        description: venueEditForm.description.trim(),
+      };
+      await apiRequest(`/venue-owner/venues/${editingVenue._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      setNotice(`Venue "${venueEditForm.name}" updated successfully! Changes are live on the homepage.`);
+      setEditingVenue(null);
+      window.dispatchEvent(new Event('eventoria:data-changed'));
+      await load();
+    } catch (err) {
+      setVenueEditError(err.message || 'Could not update venue.');
+    } finally {
+      setVenueSaving(false);
+    }
+  };
 
   const load = React.useCallback(async () => {
     setBusy(true);
@@ -167,6 +227,7 @@ export default function VenueOwnerPortalPage({ user }) {
         }),
       });
       setNotice(`Reservation #${reservation.reference} confirmed successfully! The slot is now booked.`);
+      fireConfettiCelebration();
       window.dispatchEvent(new Event('eventoria:data-changed'));
       await load();
     } catch (err) {
@@ -219,6 +280,25 @@ export default function VenueOwnerPortalPage({ user }) {
       await load();
     } catch (err) {
       setError(err.message || 'Could not submit venue.');
+    } finally {
+      setActionBusy('');
+    }
+  };
+
+  const handleDeleteVenue = async (venue) => {
+    if (!window.confirm(`Are you sure you want to permanently delete venue "${venue.name}"? This action cannot be undone.`)) {
+      return;
+    }
+    setActionBusy(venue._id);
+    setError('');
+    setNotice('');
+    try {
+      await apiRequest(`/venue-owner/venues/${venue._id}`, { method: 'DELETE' });
+      setNotice(`Venue "${venue.name}" was successfully deleted.`);
+      window.dispatchEvent(new Event('eventoria:data-changed'));
+      await load();
+    } catch (err) {
+      setError(err.message || 'Failed to delete venue.');
     } finally {
       setActionBusy('');
     }
@@ -625,26 +705,73 @@ export default function VenueOwnerPortalPage({ user }) {
                       <span style={{ fontSize: 12, fontWeight: 400, color: '#64748b' }}>/hr</span>
                     </div>
 
-                    {['draft', 'rejected'].includes(v.status) && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
                       <button
                         type="button"
-                        onClick={() => handleSubmitVenueForReview(v._id)}
-                        disabled={actionBusy === v._id}
+                        onClick={() => handleStartEditVenue(v)}
                         style={{
-                          marginTop: 'auto',
-                          background: '#0284c7',
-                          color: '#fff',
-                          border: 'none',
+                          flex: 1,
+                          minWidth: '100px',
+                          background: '#f8fafc',
+                          color: '#0f172a',
+                          border: '1px solid #cbd5e1',
                           padding: '7px 12px',
                           borderRadius: 6,
                           fontSize: 12,
                           fontWeight: 600,
                           cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5,
                         }}
                       >
-                        {actionBusy === v._id ? 'Submitting…' : 'Submit for Admin Review'}
+                        <Edit2 size={13} /> Edit Details
                       </button>
-                    )}
+                      {['draft', 'rejected'].includes(v.status) && (
+                        <button
+                          type="button"
+                          onClick={() => handleSubmitVenueForReview(v._id)}
+                          disabled={actionBusy === v._id}
+                          style={{
+                            flex: 1,
+                            minWidth: '130px',
+                            background: '#0284c7',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '7px 12px',
+                            borderRadius: 6,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {actionBusy === v._id ? 'Submitting…' : 'Submit Review'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteVenue(v)}
+                        disabled={actionBusy === v._id}
+                        style={{
+                          background: '#fee2e2',
+                          color: '#dc2626',
+                          border: '1px solid #fecaca',
+                          padding: '7px 12px',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5,
+                        }}
+                        title="Permanently delete venue"
+                      >
+                        <Trash2 size={13} /> {actionBusy === v._id ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -1062,6 +1189,169 @@ export default function VenueOwnerPortalPage({ user }) {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Edit Venue Modal */}
+      {editingVenue && (
+        <div
+          className="guest-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Edit ${editingVenue.name}`}
+          onClick={(e) => { if (e.target === e.currentTarget && !venueSaving) setEditingVenue(null); }}
+        >
+          <article style={{ maxWidth: 640, width: 'min(640px, 96%)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <button
+              className="guest-modal-close"
+              onClick={() => setEditingVenue(null)}
+              aria-label="Close edit venue modal"
+              disabled={venueSaving}
+            >
+              ×
+            </button>
+            <div style={{ padding: '24px' }}>
+              <h2 style={{ margin: '0 0 6px', fontSize: '20px', color: '#0f172a' }}>Edit Venue Details</h2>
+              <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#64748b' }}>
+                Update venue name, hourly pricing, capacity, address, amenities or description. Changes will immediately reflect on the home page and venues catalog.
+              </p>
+
+              {venueEditError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <AlertTriangle size={16} /> {venueEditError}
+                </div>
+              )}
+
+              <form onSubmit={handleSaveVenueEdit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      Venue Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={venueEditForm.name || ''}
+                      onChange={(e) => setVenueEditForm(f => ({ ...f, name: e.target.value }))}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '14px' }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      Venue Type *
+                    </label>
+                    <select
+                      value={venueEditForm.type || 'Banquet Halls'}
+                      onChange={(e) => setVenueEditForm(f => ({ ...f, type: e.target.value }))}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '13px' }}
+                    >
+                      {['Banquet Halls', 'Convention Centers', 'Resorts', 'Outdoor Spaces', 'Hotels', 'Lawns', 'Unique Venues'].map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      Price per Hour (₹) *
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={venueEditForm.price || ''}
+                      onChange={(e) => setVenueEditForm(f => ({ ...f, price: e.target.value }))}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '14px' }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      Guest Capacity *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={venueEditForm.capacity || ''}
+                      onChange={(e) => setVenueEditForm(f => ({ ...f, capacity: e.target.value }))}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '14px' }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      City *
+                    </label>
+                    <input
+                      type="text"
+                      value={venueEditForm.city || ''}
+                      onChange={(e) => setVenueEditForm(f => ({ ...f, city: e.target.value }))}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '14px' }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      Address
+                    </label>
+                    <input
+                      type="text"
+                      value={venueEditForm.address || ''}
+                      onChange={(e) => setVenueEditForm(f => ({ ...f, address: e.target.value }))}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '14px' }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Amenities (comma-separated, e.g. Parking, Wi-Fi, Air Conditioning)
+                  </label>
+                  <input
+                    type="text"
+                    value={venueEditForm.amenities || ''}
+                    onChange={(e) => setVenueEditForm(f => ({ ...f, amenities: e.target.value }))}
+                    style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '0 10px', fontSize: '14px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Description * (min 5 chars)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={venueEditForm.description || ''}
+                    onChange={(e) => setVenueEditForm(f => ({ ...f, description: e.target.value }))}
+                    style={{ width: '100%', borderRadius: '8px', border: '1px solid #cbd5e1', padding: '8px 10px', fontSize: '13px', resize: 'vertical' }}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setEditingVenue(null)}
+                    disabled={venueSaving}
+                    style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={venueSaving}
+                    style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 0, borderRadius: '8px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Save size={16} /> {venueSaving ? 'Saving Changes…' : 'Save & Update Live'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </article>
         </div>
       )}
     </div>

@@ -20,6 +20,7 @@ import { Topbar } from "./CatalogPage.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
 import { apiRequest } from "../../services/apiClient.js";
 import { useAuth } from "../../context/AuthContext.jsx";
+import CelebrationPoppers from "../../components/CelebrationPoppers.jsx";
 
 const formSteps = [
   ["Venue Information", "Basic details about your venue", FileText],
@@ -391,7 +392,8 @@ export default function ListVenuePage() {
         </aside>
 
         {submittedVenue ? (
-          <div className="venue-success-screen">
+          <div className="venue-success-screen" style={{ position: "relative", overflow: "visible" }}>
+            <CelebrationPoppers top="14px" left="-18px" right="-18px" />
             <div className="venue-success-icon">
               <CheckCircle2 size={44} />
             </div>

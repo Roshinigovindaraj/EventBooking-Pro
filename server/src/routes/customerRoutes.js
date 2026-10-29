@@ -94,8 +94,20 @@ router.patch('/venue-reservations/:id/cancel', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get('/wishlist', async (req, res, next) => { try { res.json({ items: await Wishlist.find({ user: req.user.id }).populate('item') }); } catch (e) { next(e); } });
+router.get('/wishlist', async (req, res, next) => { try { res.json({ items: await Wishlist.find({ user: req.user.id }).populate('item').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 router.post('/wishlist', validate(z.object({ body: z.object({ itemType: z.enum(['event', 'venue']), itemId: z.string().regex(/^[a-f\d]{24}$/i) }) })), async (req, res, next) => { try { const itemModel = req.body.itemType === 'event' ? 'Event' : 'Venue'; const item = await Wishlist.findOneAndUpdate({ user: req.user.id, itemType: req.body.itemType, item: req.body.itemId }, { $setOnInsert: { itemModel } }, { upsert: true, new: true }); res.status(201).json({ item }); } catch (e) { next(e); } });
-router.delete('/wishlist/:id', async (req, res, next) => { try { const result = await Wishlist.deleteOne({ _id: req.params.id, user: req.user.id }); if (!result.deletedCount) throw notFound('Wishlist item not found'); res.status(204).end(); } catch (e) { next(e); } });
+router.delete('/wishlist/:id', async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const isObjectId = /^[a-f\d]{24}$/i.test(id);
+    if (!isObjectId) throw notFound('Wishlist item not found');
+    const result = await Wishlist.deleteOne({
+      user: req.user.id,
+      $or: [{ _id: id }, { item: id }]
+    });
+    if (!result.deletedCount) throw notFound('Wishlist item not found');
+    res.status(204).end();
+  } catch (e) { next(e); }
+});
 export default router;
 

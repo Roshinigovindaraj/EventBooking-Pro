@@ -16,7 +16,8 @@ import {
   CreditCard,
   FileText,
   AlertCircle,
-  Check
+  Check,
+  Trash2
 } from 'lucide-react';
 import { apiRequest } from '../services/apiClient.js';
 
@@ -27,6 +28,7 @@ export default function AdminPortalPage() {
   const [data, setData] = React.useState({ users: [], applications: [], events: [], venues: [], logs: [] });
   const [busy, setBusy] = React.useState(true);
   const [reviewing, setReviewing] = React.useState('');
+  const [deletingEventId, setDeletingEventId] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
   const [modalError, setModalError] = React.useState('');
@@ -43,7 +45,7 @@ export default function AdminPortalPage() {
     setBusy(true);
     try {
       const [users, applications, events, venues, logs] = await Promise.all(
-        ['/admin/users', '/admin/applications', '/organizer/events', '/venue-owner/venues', '/admin/audit-logs'].map(path => apiRequest(path))
+        ['/admin/users', '/admin/applications', '/admin/events', '/admin/venues', '/admin/audit-logs'].map(path => apiRequest(path))
       );
       setData({
         users: users.items || [],
@@ -59,6 +61,49 @@ export default function AdminPortalPage() {
       setBusy(false);
     }
   }, []);
+
+  const removeEvent = async (event) => {
+    const isCompleted = event.isCompleted || (event.endsAt && new Date(event.endsAt) <= new Date());
+    const confirmMessage = isCompleted
+      ? `Are you sure you want to permanently remove completed event "${event.title}"?`
+      : `Warning: This event has not ended yet. Are you sure you want to permanently remove event "${event.title}"?`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setDeletingEventId(event._id);
+    setError('');
+    setMessage('');
+    try {
+      const res = await apiRequest(`/admin/events/${event._id}`, { method: 'DELETE' });
+      setMessage(res.message || `Event "${event.title}" removed successfully.`);
+      await load();
+    } catch (err) {
+      setError(err.message || 'Failed to remove event.');
+    } finally {
+      setDeletingEventId('');
+    }
+  };
+
+  const [deletingVenueId, setDeletingVenueId] = React.useState('');
+
+  const removeVenue = async (venue) => {
+    const confirmMessage = `Are you sure you want to permanently remove venue "${venue.name}"? This will also remove associated reservations and operational tasks.`;
+    if (!window.confirm(confirmMessage)) return;
+
+    setDeletingVenueId(venue._id);
+    setError('');
+    setMessage('');
+    try {
+      const res = await apiRequest(`/admin/venues/${venue._id}`, { method: 'DELETE' });
+      setMessage(res.message || `Venue "${venue.name}" removed successfully.`);
+      window.dispatchEvent(new Event('eventoria:data-changed'));
+      await load();
+    } catch (err) {
+      setError(err.message || 'Failed to remove venue.');
+    } finally {
+      setDeletingVenueId('');
+    }
+  };
 
   React.useEffect(() => {
     load();
@@ -327,6 +372,235 @@ export default function AdminPortalPage() {
               {!items.length && <small>No records yet.</small>}
             </article>
           ))}
+        </div>
+      </section>
+
+      {/* Event Lifecycle & Removal Management */}
+      <section className="admin-approvals" style={{ marginTop: '32px' }}>
+        <header>
+          <div>
+            <p>EVENT LIFECYCLE OPERATIONS</p>
+            <h2>Manage Platform Events & Cleanup</h2>
+            <small>Inspect event sales and remove completed, past, or cancelled events from the platform.</small>
+          </div>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>
+            {data.events.length} total events
+          </span>
+        </header>
+
+        <div style={{ overflowX: 'auto', background: '#fff', borderRadius: '14px', border: '1.5px solid #e2e8f0', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', margin: '14px 0' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #e2e8f0', color: '#475569' }}>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Event</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Organizer</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Schedule</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Status</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Tickets Sold / Cap</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.events.map(ev => {
+                const isCompleted = ev.isCompleted || (ev.endsAt && new Date(ev.endsAt) <= new Date());
+                const totalCap = ev.totalCapacity || (ev.ticketTypes || []).reduce((s, t) => s + (t.capacity || 0), 0);
+                const totalSold = ev.totalSold || (ev.ticketTypes || []).reduce((s, t) => s + (t.sold || 0), 0);
+                const isSoldOut = ev.isSoldOut || (totalCap > 0 && totalSold >= totalCap);
+
+                return (
+                  <tr key={ev._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '14px 18px' }}>
+                      <b style={{ color: '#0f172a', display: 'block', fontSize: '14px' }}>{ev.title}</b>
+                      <small style={{ color: '#64748b' }}>{ev.category} · {ev.location?.city || ev.city}</small>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <span style={{ fontWeight: 500, color: '#1e293b' }}>{ev.organizer?.name || 'Organizer'}</span>
+                      <small style={{ display: 'block', color: '#64748b' }}>{ev.organizer?.email}</small>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <span style={{ display: 'block', color: '#1e293b' }}>
+                        {ev.startsAt ? new Date(ev.startsAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      </span>
+                      <small style={{ color: '#64748b' }}>
+                        to {ev.endsAt ? new Date(ev.endsAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      </small>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'flex-start' }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          background: isCompleted ? '#f1f5f9' : '#ecfdf5',
+                          color: isCompleted ? '#475569' : '#047857',
+                          border: `1px solid ${isCompleted ? '#cbd5e1' : '#a7f3d0'}`
+                        }}>
+                          {isCompleted ? '✓ Completed' : '● Active / Upcoming'}
+                        </span>
+                        {isSoldOut && (
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            background: '#fee2e2',
+                            color: '#dc2626',
+                            border: '1px solid #fecaca'
+                          }}>
+                            SOLD OUT
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <b style={{ color: totalSold > 0 ? '#2563eb' : '#64748b' }}>{totalSold}</b> / {totalCap} tickets
+                      {totalCap > 0 && (
+                        <div style={{ width: '90px', height: '6px', background: '#e2e8f0', borderRadius: '4px', marginTop: '5px', overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(100, Math.round((totalSold / totalCap) * 100))}%`, height: '100%', background: isSoldOut ? '#dc2626' : '#2563eb' }} />
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '14px 18px', textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        disabled={deletingEventId === ev._id}
+                        onClick={() => removeEvent(ev)}
+                        style={{
+                          background: isCompleted ? '#fee2e2' : '#fff1f2',
+                          color: '#dc2626',
+                          border: '1px solid #fca5a5',
+                          borderRadius: '8px',
+                          padding: '7px 14px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                        title={isCompleted ? 'Remove completed event from platform' : 'Remove event'}
+                      >
+                        <Trash2 size={14} />
+                        {deletingEventId === ev._id ? 'Removing…' : isCompleted ? 'Remove Completed Event' : 'Remove Event'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!data.events.length && (
+                <tr>
+                  <td colSpan={6} style={{ padding: '36px 16px', textAlign: 'center', color: '#64748b' }}>
+                    No events currently registered on the platform.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Venue Lifecycle & Removal Management */}
+      <section className="admin-approvals" style={{ marginTop: '32px' }}>
+        <header>
+          <div>
+            <p>VENUE LIFECYCLE OPERATIONS</p>
+            <h2>Manage Platform Venues & Cleanup</h2>
+            <small>Inspect venue listings and remove outdated, closed, or discontinued venues from the platform.</small>
+          </div>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>
+            {data.venues.length} total venues
+          </span>
+        </header>
+
+        <div style={{ overflowX: 'auto', background: '#fff', borderRadius: '14px', border: '1.5px solid #e2e8f0', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', margin: '14px 0' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #e2e8f0', color: '#475569' }}>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Venue</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Owner</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Type & Location</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Status</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600 }}>Capacity & Rate</th>
+                <th style={{ padding: '14px 18px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.venues.map(v => {
+                const priceFormatted = v.priceMinorPerHour ? `₹${Math.round(v.priceMinorPerHour / 100).toLocaleString('en-IN')}/hr` : '—';
+
+                return (
+                  <tr key={v._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '14px 18px' }}>
+                      <b style={{ color: '#0f172a', display: 'block', fontSize: '14px' }}>{v.name}</b>
+                      <small style={{ color: '#64748b' }}>{v.description ? v.description.slice(0, 60) + '…' : 'Venue space'}</small>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <span style={{ fontWeight: 500, color: '#1e293b' }}>{v.owner?.name || 'Owner'}</span>
+                      <small style={{ display: 'block', color: '#64748b' }}>{v.owner?.email || '—'}</small>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <span style={{ display: 'block', color: '#1e293b', fontWeight: 500 }}>{v.type || 'Banquet'}</span>
+                      <small style={{ color: '#64748b' }}>{v.location?.city || v.city || 'Tamil Nadu'}{v.location?.address ? `, ${v.location.address}` : ''}</small>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        background: v.status === 'published' ? '#ecfdf5' : v.status === 'pending_review' ? '#fffbeb' : '#f1f5f9',
+                        color: v.status === 'published' ? '#047857' : v.status === 'pending_review' ? '#b45309' : '#475569',
+                        border: `1px solid ${v.status === 'published' ? '#a7f3d0' : v.status === 'pending_review' ? '#fde68a' : '#cbd5e1'}`
+                      }}>
+                        {v.status || 'draft'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 18px' }}>
+                      <b style={{ color: '#2563eb' }}>{v.capacity || 0}</b> guests
+                      <small style={{ display: 'block', color: '#64748b' }}>{priceFormatted}</small>
+                    </td>
+                    <td style={{ padding: '14px 18px', textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        disabled={deletingVenueId === v._id}
+                        onClick={() => removeVenue(v)}
+                        style={{
+                          background: '#fee2e2',
+                          color: '#dc2626',
+                          border: '1px solid #fca5a5',
+                          borderRadius: '8px',
+                          padding: '7px 14px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                        title="Remove venue permanently from platform"
+                      >
+                        <Trash2 size={14} />
+                        {deletingVenueId === v._id ? 'Removing…' : 'Remove Venue'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!data.venues.length && (
+                <tr>
+                  <td colSpan={6} style={{ padding: '36px 16px', textAlign: 'center', color: '#64748b' }}>
+                    No venues currently registered on the platform.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
 

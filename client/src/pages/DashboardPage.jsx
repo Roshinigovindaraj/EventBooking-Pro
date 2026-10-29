@@ -6,6 +6,8 @@ import { Topbar } from "./public/CatalogPage.jsx";
 import SiteFooter from "../components/SiteFooter.jsx";
 import { canDownloadEventTickets, downloadEventTickets } from "../utils/ticketPdf.js";
 import { apiRequest } from "../services/apiClient.js";
+import { loadAllWishlist, removeWishlistItem } from "../services/wishlistService.js";
+import { fireConfettiCelebration } from "../components/CelebrationPoppers.jsx";
 
 const roleNames = { customer: "Customer", event_organizer: "Event Organizer", venue_owner: "Venue Owner", event_staff: "Event Staff", venue_staff: "Venue Staff", admin: "Administrator", super_admin: "Super Administrator" };
 const rolePortals = { event_organizer: 'organizer', venue_owner: 'venue-owner', event_staff: 'event-staff', venue_staff: 'venue-staff', admin: 'admin', super_admin: 'super-admin' };
@@ -77,33 +79,29 @@ export default function DashboardPage() {
   const [bookings, setBookings] = React.useState([]);
   const [bookingError, setBookingError] = React.useState("");
   const [wishlistOnly, setWishlistOnly] = React.useState(false);
-  const loadWishlist = React.useCallback(() => {
+  const loadWishlist = React.useCallback(async () => {
     if (!user) return setWishlist([]);
-    const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
-    const prefix = `eventoria:wishlist:${owner}:`;
-    const items = [];
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith(prefix)) continue;
-      const subKey = key.slice(prefix.length);
-      const val = localStorage.getItem(key);
-      if (!val || val === "0") continue;
-      try {
-        const parsed = JSON.parse(val);
-        if (parsed && (parsed.title || parsed.name)) {
-          items.push({
-            ...parsed,
-            kind: subKey.startsWith("venue") ? "venue" : "event",
-            key: subKey,
-          });
-        }
-      } catch {
-        // legacy flag without full payload
-      }
+    try {
+      const items = await loadAllWishlist(user);
+      setWishlist(items);
+    } catch {
+      setWishlist([]);
     }
-    setWishlist(items);
   }, [user]);
-  React.useEffect(loadWishlist, [loadWishlist]);
+
+  React.useEffect(() => {
+    loadWishlist();
+    const onWishlistChanged = () => loadWishlist();
+    window.addEventListener("eventoria:wishlist-updated", onWishlistChanged);
+    return () => window.removeEventListener("eventoria:wishlist-updated", onWishlistChanged);
+  }, [loadWishlist]);
+
+  React.useEffect(() => {
+    if (window.location.hash === "#wishlist") {
+      setWishlistOnly(true);
+      document.getElementById("wishlist")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, []);
   React.useEffect(() => {
     if (!user) return setBookings([]);
     const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
@@ -186,15 +184,15 @@ export default function DashboardPage() {
     setDownloadingId(booking.id);
     try {
       await downloadEventTickets({ ...booking, customerName: booking.customerName || user.name });
+      fireConfettiCelebration();
     } catch (err) {
       alert(err.message || "Failed to download ticket PDF.");
     } finally {
       setDownloadingId(null);
     }
   };
-  const removeFavorite = (item) => {
-    const owner = encodeURIComponent(user._id || user.id || user.email.toLowerCase());
-    localStorage.removeItem(`eventoria:wishlist:${owner}:${item.key}`);
+  const removeFavorite = async (item) => {
+    await removeWishlistItem(item, user);
     loadWishlist();
   };
   if (loading) return <p className="state-message">Restoring your session…</p>;

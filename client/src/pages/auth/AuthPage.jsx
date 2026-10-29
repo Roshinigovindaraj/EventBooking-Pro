@@ -2,6 +2,7 @@ import React from "react";
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, Sparkles, User, X } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
+import LoginSuccessModal from "../../components/LoginSuccessModal.jsx";
 
 export default function AuthPage() {
   const { mode } = useParams();
@@ -20,14 +21,27 @@ export default function AuthPage() {
   const [newPassword, setNewPassword] = React.useState("");
   const [resetError, setResetError] = React.useState("");
   const [resetBusy, setResetBusy] = React.useState(false);
+  const [successModal, setSuccessModal] = React.useState(false);
+  const targetDestinationRef = React.useRef("/dashboard");
+
+  React.useEffect(() => {
+    setSuccessModal(false);
+    setError("");
+  }, [mode]);
 
   const submit = async (event) => {
     event.preventDefault(); setError(""); setBusy(true);
     try {
       const email = form.email.trim().toLowerCase();
       await (registerMode ? register({ ...form, email }) : login({ email, password: form.password }));
-      navigate(location.state?.from || "/dashboard", { replace: true });
+      targetDestinationRef.current = location.state?.from || "/dashboard";
+      setSuccessModal(true);
     } catch (caught) { setError(caught.message); } finally { setBusy(false); }
+  };
+
+  const handleContinue = () => {
+    setSuccessModal(false);
+    navigate(targetDestinationRef.current, { replace: true });
   };
   const openReset = () => { setResetEmail(form.email); setResetStage("request"); setResetToken(""); setNewPassword(""); setResetError(""); setForgotOpen(true); };
   const requestReset = async (event) => {
@@ -53,7 +67,11 @@ export default function AuthPage() {
         <div className="auth-visual-badge"><Sparkles/><span><b>Thousands of experiences</b><small>All in one beautiful place</small></span></div>
       </aside>
       <section className="auth-card">
-        <div className="auth-card-mark"><ShieldCheck/></div><p className="eyebrow">{registerMode ? "START YOUR JOURNEY" : "WELCOME TO EVENTORIA"}</p><h1>{registerMode ? "Create your account" : "Welcome back"}</h1><p>{registerMode ? "Join Eventoria and start creating unforgettable moments." : "Enter your details to continue to your account."}</p>
+        <div className="auth-card-mark"><ShieldCheck/></div>
+        <p className="eyebrow">{registerMode ? "START YOUR JOURNEY" : "WELCOME TO EVENTORIA"}</p>
+        <h1>{registerMode ? "Create your account" : "Welcome back"}</h1>
+        <p>{registerMode ? "Join Eventoria and start creating unforgettable moments." : "Enter your details to continue to your account."}</p>
+        {location.state?.notice && !error && <div style={{ margin: '0 0 16px', padding: '10px 14px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '10px', fontSize: '13px', fontWeight: 600 }}>ℹ️ {location.state.notice}</div>}
         {error && <div className="form-error" role="alert">{error}</div>}
         <form onSubmit={submit}>
           {registerMode && <label>Full name<div className="auth-field"><User/><input required minLength="2" autoComplete="name" placeholder="Enter your full name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></div></label>}
@@ -72,5 +90,19 @@ export default function AuthPage() {
       : resetStage === "password" ? <><i><LockKeyhole/></i><p className="eyebrow">CREATE NEW PASSWORD</p><h2 id="reset-title">Set a new password</h2><p>Choose a secure password containing at least 10 characters.</p>{resetError && <div className="form-error">{resetError}</div>}<form onSubmit={completeReset}><label>New password<div className="auth-field"><LockKeyhole/><input type={showPassword ? "text" : "password"} required minLength="10" autoFocus value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Minimum 10 characters"/><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff/> : <Eye/>}</button></div></label><button className="auth-submit" disabled={resetBusy}>{resetBusy ? "Updating…" : "Reset Password"}<ArrowRight/></button></form></>
       : <><i><LockKeyhole/></i><p className="eyebrow">ACCOUNT RECOVERY</p><h2 id="reset-title">Forgot your password?</h2><p>Enter your email address to securely reset your password.</p>{resetError && <div className="form-error">{resetError}</div>}<form onSubmit={requestReset}><label>Email address<div className="auth-field"><Mail/><input type="email" required autoFocus autoCapitalize="none" spellCheck="false" value={resetEmail} onChange={(event) => setResetEmail(event.target.value.toLowerCase())} placeholder="you@example.com"/></div></label><button className="auth-submit" disabled={resetBusy}>{resetBusy ? "Please wait…" : "Continue"}<ArrowRight/></button></form></>}
     </section></div>}
+    {successModal && (
+      <LoginSuccessModal
+        open={successModal}
+        onContinue={handleContinue}
+        titleTop={registerMode ? "Account" : "Login"}
+        titleBottom={registerMode ? "Created!" : "Successful!"}
+        description={
+          registerMode
+            ? `Welcome to Eventoria${form.name?.trim() ? `, ${form.name.trim()}` : ""}! Your account has been created successfully.`
+            : "Welcome back! You have been logged in successfully to your account."
+        }
+        buttonText="Continue"
+      />
+    )}
   </main>;
 }

@@ -19,6 +19,24 @@ export async function createEventBooking({ customerId, eventId, ticketTypeId, qu
       if (!event || !type) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Bookable event or ticket type not found');
       if (quantity < type.minPerOrder || quantity > type.maxPerOrder) throw new AppError(422, 'INVALID_QUANTITY', `Quantity must be between ${type.minPerOrder} and ${type.maxPerOrder}`);
       if ((type.salesStart && type.salesStart > now) || (type.salesEnd && type.salesEnd < now)) throw new AppError(409, 'SALES_CLOSED', 'Ticket sales are not open');
+
+      // Check real-time confirmed bookings sales
+      const confirmedBookings = await Booking.find({
+        event: event._id,
+        ticketTypeId: type._id,
+        status: 'confirmed',
+      }).session(session);
+      const realSold = confirmedBookings.reduce((sum, b) => sum + (b.quantity || 0), 0);
+      const effectiveSold = Math.max(type.sold || 0, realSold);
+      const available = Math.max(0, (type.capacity || 0) - effectiveSold - (type.reserved || 0));
+
+      if (available <= 0) {
+        throw new AppError(409, 'SOLD_OUT', 'All tickets for this event tier are sold out. No more tickets can be booked.');
+      }
+      if (available < quantity) {
+        throw new AppError(409, 'INSUFFICIENT_TICKETS', `Only ${available} ticket(s) remaining for this tier.`);
+      }
+
       const reserved = await Event.updateOne(
         { _id: event.id, 'ticketTypes._id': type.id, $expr: { $lte: [{ $add: [{ $arrayElemAt: ['$ticketTypes.reserved', { $indexOfArray: ['$ticketTypes._id', type._id] }] }, { $arrayElemAt: ['$ticketTypes.sold', { $indexOfArray: ['$ticketTypes._id', type._id] }] }, quantity] }, { $arrayElemAt: ['$ticketTypes.capacity', { $indexOfArray: ['$ticketTypes._id', type._id] }] }] } },
         { $inc: { 'ticketTypes.$.reserved': quantity } }, { session }

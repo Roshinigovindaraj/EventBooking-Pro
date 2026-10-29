@@ -11,7 +11,12 @@ const schema = z.object({ body: z.object({ details: z.record(z.unknown()).refine
 for (const [path, type] of [['organizer', 'organizer'], ['venue-owner', 'venue_owner']]) {
   router.post(`/${path}/applications`, validate(schema), async (req, res, next) => {
     try {
-      if (await Application.exists({ applicant: req.user.id, type, status: 'pending' })) throw new AppError(409, 'APPLICATION_PENDING', 'An application is already pending');
+      const existing = await Application.findOne({ applicant: req.user.id, type, status: 'pending' });
+      if (existing) {
+        existing.details = { ...(existing.details || {}), ...req.body.details };
+        await existing.save();
+        return res.status(200).json({ application: existing });
+      }
       res.status(201).json({ application: await Application.create({ applicant: req.user.id, type, details: req.body.details }) });
     } catch (e) { next(e); }
   });
