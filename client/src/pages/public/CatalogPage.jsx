@@ -232,7 +232,7 @@ export function Topbar({ home = false, active = home ? "home" : "events" }) {
           <CalendarDays/><span>Events</span>
         </Link>
         <Link className={active === "venues" ? "active" : ""} to="/venues" onClick={() => setOpen(false)}><MapPin/><span>Venues</span></Link>
-        <Link className={active === "organize" ? "active" : ""} to={user?.roles?.includes('event_organizer') ? '/portal/organizer' : '/organize#become-organizer'} onClick={() => setOpen(false)}><Users/><span>{user?.roles?.includes('event_organizer') ? 'Manage Events' : 'Become an Organizer'}</span></Link>
+        <Link className={active === "organize" ? "active" : ""} to={user?.roles?.some(r => ['event_organizer', 'admin', 'super_admin'].includes(r)) ? '/portal/organizer' : '/organize#become-organizer'} onClick={() => setOpen(false)}><Users/><span>{user?.roles?.some(r => ['event_organizer', 'admin', 'super_admin'].includes(r)) ? 'Manage Events' : 'Become an Organizer'}</span></Link>
         <Link className={active === "list" ? "active" : ""} to="/list-venue" onClick={() => setOpen(false)}><Store/><span>List Your Venue</span></Link>
       </nav>
       <div className="evx-account">

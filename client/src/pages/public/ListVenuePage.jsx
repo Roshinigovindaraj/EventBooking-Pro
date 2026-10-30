@@ -14,7 +14,10 @@ import {
   Settings,
   ShieldCheck,
   Star,
-  Users
+  Users,
+  Edit3,
+  X,
+  Clock
 } from "lucide-react";
 import { Topbar } from "./CatalogPage.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
@@ -39,6 +42,8 @@ export default function ListVenuePage() {
   const [application, setApplication] = React.useState(null);
   const [loadingApp, setLoadingApp] = React.useState(false);
   const [step, setStep] = React.useState(0);
+  const [detailsConfirmed, setDetailsConfirmed] = React.useState(false);
+  const [showConfirmModal, setShowConfirmModal] = React.useState(false);
   const [notice, setNotice] = React.useState("");
   const [errorNotice, setErrorNotice] = React.useState("");
   const [saving, setSaving] = React.useState(false);
@@ -54,7 +59,14 @@ export default function ListVenuePage() {
     capacity: "300",
     amenities: "Parking, Wi-Fi",
     image: "",
-    price: "25000"
+    price: "25000",
+    openingTime: "08:00",
+    openingAmPm: "AM",
+    closingTime: "11:00",
+    closingAmPm: "PM",
+    is24Hours: false,
+    availableDays: "All Days (Mon - Sun)",
+    minBookingHours: "4"
   });
   const [mediaMode, setMediaMode] = React.useState('upload');
   const [uploadingMedia, setUploadingMedia] = React.useState(false);
@@ -80,7 +92,14 @@ export default function ListVenuePage() {
               image: app.details.image || current.image,
               price: app.details.pricePerHour ? String(app.details.pricePerHour) : current.price,
               full: app.details.description || current.full,
-              short: app.details.short || current.short || (app.details.description ? app.details.description.slice(0, 160) : '')
+              short: app.details.short || current.short || (app.details.description ? app.details.description.slice(0, 160) : ''),
+              openingTime: app.details.openingTime || current.openingTime,
+              openingAmPm: app.details.openingAmPm || current.openingAmPm,
+              closingTime: app.details.closingTime || current.closingTime,
+              closingAmPm: app.details.closingAmPm || current.closingAmPm,
+              is24Hours: Boolean(app.details.is24Hours),
+              availableDays: app.details.availableDays || current.availableDays,
+              minBookingHours: app.details.minBookingHours ? String(app.details.minBookingHours) : current.minBookingHours
             }));
           }
         })
@@ -95,11 +114,22 @@ export default function ListVenuePage() {
       const savedDraft = localStorage.getItem('eventoria_venue_draft');
       if (savedDraft) {
         const parsed = JSON.parse(savedDraft);
-        setForm(current => ({ ...current, ...parsed }));
+        const { step: savedStep, ...formFields } = parsed;
+        setForm(current => ({ ...current, ...formFields }));
+        if (typeof savedStep === 'number' && savedStep >= 0 && savedStep <= 5) {
+          setStep(savedStep);
+        }
         setNotice('Restored your draft venue details.');
       }
     } catch {}
   }, []);
+
+  // Continuously save draft & step
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('eventoria_venue_draft', JSON.stringify({ ...form, step }));
+    } catch {}
+  }, [form, step]);
 
   React.useEffect(() => {
     apiRequest('/venues').then(res => setFeaturedVenues((res.items || []).slice(0, 4))).catch(() => null);
@@ -213,6 +243,10 @@ export default function ListVenuePage() {
     // 3. For Customer accounts: Submit as a Venue Partner Application for Admin review
     if (!isVenueOwner) {
       try {
+        const operatingHoursStr = form.is24Hours
+          ? "Open 24 Hours"
+          : `${form.openingTime || '08:00'} ${form.openingAmPm || 'AM'} – ${form.closingTime || '11:00'} ${form.closingAmPm || 'PM'}`;
+
         const details = {
           venueName: form.name.trim(),
           type: form.type,
@@ -222,6 +256,14 @@ export default function ListVenuePage() {
           amenities: form.amenities.split(',').map(value => value.trim()).filter(Boolean),
           image: form.image || '',
           pricePerHour: Number(form.price),
+          operatingHours: operatingHoursStr,
+          openingTime: form.openingTime || '08:00',
+          openingAmPm: form.openingAmPm || 'AM',
+          closingTime: form.closingTime || '11:00',
+          closingAmPm: form.closingAmPm || 'PM',
+          is24Hours: Boolean(form.is24Hours),
+          availableDays: form.availableDays || 'All Days (Mon - Sun)',
+          minBookingHours: Number(form.minBookingHours) || 4,
           description,
           submittedAt: new Date().toISOString()
         };
@@ -269,7 +311,10 @@ export default function ListVenuePage() {
           images: form.image ? [form.image] : [],
           priceMinorPerHour: Math.round(Number(form.price) * 100),
           currency: 'INR',
-          manualApproval: false
+          manualApproval: false,
+          operatingHours: form.is24Hours ? "Open 24 Hours" : `${form.openingTime || '08:00'} ${form.openingAmPm || 'AM'} – ${form.closingTime || '11:00'} ${form.closingAmPm || 'PM'}`,
+          availableDays: form.availableDays || 'All Days (Mon - Sun)',
+          minBookingHours: Number(form.minBookingHours) || 4
         })
       });
 
@@ -379,12 +424,13 @@ export default function ListVenuePage() {
       )}
 
       <section className="org-builder lv-builder">
-        <aside>
+        <aside style={{ overflowY: 'auto' }}>
           {formSteps.map(([title,text,Icon],index)=>(
             <button
               className={step===index && !submittedVenue ? 'active' : ''}
               onClick={()=>{ setStep(index); setSubmittedVenue(null); }}
               key={title}
+              style={{ height: 'auto', minHeight: '64px', padding: '12px 18px' }}
             >
               <b>{index+1}</b><span><strong>{title}</strong><small>{text}</small></span><Icon/>
             </button>
@@ -446,7 +492,14 @@ export default function ListVenuePage() {
             </div>
           </div>
         ) : (
-          <form onSubmit={(event)=>{event.preventDefault();saveVenue(true)}}>
+          <form onSubmit={(event)=>{
+            event.preventDefault();
+            if (step < 5) {
+              handleNextStep();
+            } else {
+              setShowConfirmModal(true);
+            }
+          }}>
             <h2>{formSteps[step][0]}</h2>
             <p>Tell us about your venue. This information will be visible to event organizers.</p>
 
@@ -549,44 +602,493 @@ export default function ListVenuePage() {
                 )}
               </div>
             ) : step===4 ? (
-              <label>Price per hour (INR) <em>*</em><input type="number" min="0" value={form.price} onChange={update('price')} placeholder="e.g. 5000" required/></label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+                {/* 1. Hourly Pricing */}
+                <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '20px', boxShadow: '0 2px 8px rgba(15, 23, 42, 0.03)' }}>
+                  <h4 style={{ margin: '0 0 14px', fontSize: '15px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Settings size={18} color="#e11d48" /> Hourly Rental Pricing
+                  </h4>
+                  <div className="org-form-grid" style={{ marginBottom: 0 }}>
+                    <label>
+                      <span>Price Per Hour (INR) <em>*</em></span>
+                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                        <span style={{ position: 'absolute', left: '14px', fontWeight: 700, color: '#64748b' }}>₹</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={form.price}
+                          onChange={update('price')}
+                          placeholder="e.g. 15000"
+                          required
+                          style={{ paddingLeft: '32px' }}
+                        />
+                      </div>
+                    </label>
+                    <label>
+                      <span>Minimum Booking Duration <em>*</em></span>
+                      <select value={form.minBookingHours || '4'} onChange={update('minBookingHours')}>
+                        <option value="1">1 Hour Minimum</option>
+                        <option value="2">2 Hours Minimum</option>
+                        <option value="4">4 Hours Minimum (Standard)</option>
+                        <option value="6">6 Hours Minimum</option>
+                        <option value="8">8 Hours (Full Day Event)</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div style={{ marginTop: '12px', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '12px' }}>
+                    <span>Estimated 8-Hour Full-Day Booking: <b style={{ color: '#16a34a' }}>₹{((Number(form.price) || 0) * 8).toLocaleString('en-IN')}</b></span>
+                    <span style={{ color: '#64748b' }}>Charges apply per hour based on event start &amp; end times.</span>
+                  </div>
+                </div>
+
+                {/* 2. Operating Hours & Daily Timings */}
+                <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '20px', boxShadow: '0 2px 8px rgba(15, 23, 42, 0.03)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Clock size={18} color="#e11d48" /> Venue Operating Hours &amp; Available Timings
+                      </h4>
+                      <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b' }}>
+                        Set when event organizers can book and use your venue daily.
+                      </p>
+                    </div>
+                    <div style={{ display: 'inline-flex', borderRadius: '8px', overflow: 'hidden', border: '1.5px solid #cbd5e1', background: '#fff' }}>
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, is24Hours: false }))}
+                        style={{
+                          padding: '8px 14px',
+                          border: 0,
+                          fontWeight: 700,
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          background: !form.is24Hours ? '#e11d48' : '#fff',
+                          color: !form.is24Hours ? '#fff' : '#64748b'
+                        }}
+                      >
+                        🕒 Specific Hours
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, is24Hours: true }))}
+                        style={{
+                          padding: '8px 14px',
+                          border: 0,
+                          fontWeight: 700,
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          background: form.is24Hours ? '#e11d48' : '#fff',
+                          color: form.is24Hours ? '#fff' : '#64748b'
+                        }}
+                      >
+                        ⚡ Open 24/7
+                      </button>
+                    </div>
+                  </div>
+
+                  {!form.is24Hours ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+                      {/* Opening Time Box */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                          Opening Time (Start of Day)
+                        </span>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            placeholder="08:00"
+                            maxLength={5}
+                            value={form.openingTime || '08:00'}
+                            onChange={(e) => setForm(f => ({ ...f, openingTime: e.target.value.replace(/[^0-9:]/g, '') }))}
+                            style={{ flex: 1, height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '15px', fontWeight: 700, textAlign: 'center', color: '#1e293b' }}
+                          />
+                          <div style={{ display: 'inline-flex', borderRadius: '8px', overflow: 'hidden', border: '1.5px solid #cbd5e1', background: '#fff' }}>
+                            <button
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, openingAmPm: 'AM' }))}
+                              style={{
+                                padding: '0 14px',
+                                height: '38px',
+                                border: 0,
+                                fontWeight: 700,
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                background: (form.openingAmPm || 'AM') === 'AM' ? '#e11d48' : '#fff',
+                                color: (form.openingAmPm || 'AM') === 'AM' ? '#fff' : '#64748b'
+                              }}
+                            >
+                              AM
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, openingAmPm: 'PM' }))}
+                              style={{
+                                padding: '0 14px',
+                                height: '38px',
+                                border: 0,
+                                fontWeight: 700,
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                background: (form.openingAmPm || 'AM') === 'PM' ? '#e11d48' : '#fff',
+                                color: (form.openingAmPm || 'AM') === 'PM' ? '#fff' : '#64748b'
+                              }}
+                            >
+                              PM
+                            </button>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>e.g. 06:00 AM, 08:00 AM, 09:30 AM</span>
+                      </div>
+
+                      {/* Closing Time Box */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                          Closing Time (End of Day)
+                        </span>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            placeholder="11:00"
+                            maxLength={5}
+                            value={form.closingTime || '11:00'}
+                            onChange={(e) => setForm(f => ({ ...f, closingTime: e.target.value.replace(/[^0-9:]/g, '') }))}
+                            style={{ flex: 1, height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '15px', fontWeight: 700, textAlign: 'center', color: '#1e293b' }}
+                          />
+                          <div style={{ display: 'inline-flex', borderRadius: '8px', overflow: 'hidden', border: '1.5px solid #cbd5e1', background: '#fff' }}>
+                            <button
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, closingAmPm: 'AM' }))}
+                              style={{
+                                padding: '0 14px',
+                                height: '38px',
+                                border: 0,
+                                fontWeight: 700,
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                background: (form.closingAmPm || 'PM') === 'AM' ? '#e11d48' : '#fff',
+                                color: (form.closingAmPm || 'PM') === 'AM' ? '#fff' : '#64748b'
+                              }}
+                            >
+                              AM
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, closingAmPm: 'PM' }))}
+                              style={{
+                                padding: '0 14px',
+                                height: '38px',
+                                border: 0,
+                                fontWeight: 700,
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                background: (form.closingAmPm || 'PM') === 'PM' ? '#e11d48' : '#fff',
+                                color: (form.closingAmPm || 'PM') === 'PM' ? '#fff' : '#64748b'
+                              }}
+                            >
+                              PM
+                            </button>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>e.g. 10:00 PM, 11:00 PM, 11:59 PM</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <CheckCircle2 size={24} color="#16a34a" />
+                      <div>
+                        <b style={{ color: '#15803d', fontSize: '13px', display: 'block' }}>24 Hours Round-The-Clock Booking Active</b>
+                        <span style={{ color: '#166534', fontSize: '12px' }}>Organizers can request bookings at any hour of the day or night.</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Available Days Selector */}
+                  <div style={{ marginTop: '16px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '8px' }}>
+                      Available Days of the Week
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {[
+                        'All Days (Mon - Sun)',
+                        'Monday - Saturday',
+                        'Weekends Only (Sat - Sun)',
+                        'Weekdays Only (Mon - Fri)'
+                      ].map(daysOption => {
+                        const isSelected = (form.availableDays || 'All Days (Mon - Sun)') === daysOption;
+                        return (
+                          <button
+                            key={daysOption}
+                            type="button"
+                            onClick={() => setForm(f => ({ ...f, availableDays: daysOption }))}
+                            style={{
+                              padding: '7px 14px',
+                              borderRadius: '8px',
+                              border: isSelected ? '1.5px solid #e11d48' : '1px solid #cbd5e1',
+                              background: isSelected ? '#fff0f3' : '#fff',
+                              color: isSelected ? '#e11d48' : '#475569',
+                              fontWeight: isSelected ? 700 : 500,
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            {isSelected ? '✓ ' : ''}{daysOption}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Current Selection Summary Badge */}
+                  <div style={{ marginTop: '14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#047857', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Check size={16} />
+                    <span>
+                      Selected Schedule: <b>{form.is24Hours ? 'Open 24 Hours Daily' : `${form.openingTime || '08:00'} ${form.openingAmPm || 'AM'} – ${form.closingTime || '11:00'} ${form.closingAmPm || 'PM'}`}</b> ({form.availableDays || 'All Days (Mon - Sun)'})
+                    </span>
+                  </div>
+                </div>
+              </div>
             ) : (
-              <div className="review-summary-box">
-                <h3>
-                  <span>Ready for Verification</span>
-                  <small style={{ fontSize: 11, color: '#657086', fontWeight: 'normal' }}>Review your information before submitting</small>
-                </h3>
-                <div className="review-summary-grid">
-                  <div className="review-item">
-                    <span>Venue Name</span>
-                    <b>{form.name || <small style={{ color: '#b01949' }}>Missing name</small>}</b>
-                    <button type="button" className="btn-edit-step" onClick={() => setStep(0)}>Edit</button>
+              <div className="venue-review-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {/* Review Header Banner */}
+                <div style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', border: '1.5px solid #cbd5e1', borderRadius: '16px', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <span style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '11px', fontWeight: 800, padding: '3px 9px', borderRadius: '6px', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                        Final Step 6 of 6
+                      </span>
+                      <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '6px' }}>
+                        🔍 Review &amp; Check Details
+                      </span>
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                      Please Check All Your Venue Details
+                    </h3>
+                    <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#475569' }}>
+                      Review your information below before submitting for verification. Click <b>Edit</b> on any section to modify.
+                    </p>
                   </div>
-                  <div className="review-item">
-                    <span>Venue Type</span>
-                    <b>{form.type || <small style={{ color: '#b01949' }}>Not selected</small>}</b>
-                    <button type="button" className="btn-edit-step" onClick={() => setStep(0)}>Edit</button>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmModal(true)}
+                    disabled={saving}
+                    style={{
+                      background: detailsConfirmed ? '#e11d48' : '#64748b',
+                      color: '#fff',
+                      border: 0,
+                      padding: '11px 22px',
+                      borderRadius: '10px',
+                      fontWeight: 700,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: detailsConfirmed ? '0 4px 14px rgba(225, 29, 72, 0.3)' : 'none',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <span>Check &amp; Submit Venue</span>
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
+
+                {/* 1. Venue Basic Information */}
+                <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileText size={17} color="#e11d48" /> 1. Venue Information
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setStep(0)}
+                      style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
                   </div>
-                  <div className="review-item">
-                    <span>Location</span>
-                    <b>{form.city ? `${form.city}${form.address ? ', ' + form.address : ''}` : <small style={{ color: '#b01949' }}>City required</small>}</b>
-                    <button type="button" className="btn-edit-step" onClick={() => setStep(1)}>Edit</button>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '13px' }}>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>VENUE NAME</span>
+                      <b style={{ color: '#0f172a', fontSize: '15px' }}>{form.name || 'Untitled Venue'}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>VENUE TYPE</span>
+                      <b style={{ color: '#0f172a' }}>{form.type || 'Not selected'}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>SHORT SUMMARY</span>
+                      <span style={{ color: '#334155' }}>{form.short || 'Not provided'}</span>
+                    </div>
                   </div>
-                  <div className="review-item">
-                    <span>Guest Capacity</span>
-                    <b>{form.capacity} Guests</b>
-                    <button type="button" className="btn-edit-step" onClick={() => setStep(2)}>Edit</button>
+                  {form.full && (
+                    <div style={{ marginTop: '12px', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>FULL DESCRIPTION</span>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#334155', lineHeight: 1.5 }}>
+                        {form.full}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Location */}
+                <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <MapPin size={17} color="#e11d48" /> 2. Location &amp; Address
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setStep(1)}
+                      style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
                   </div>
-                  <div className="review-item">
-                    <span>Rate / Hour</span>
-                    <b>₹{form.price || 0} / hr</b>
-                    <button type="button" className="btn-edit-step" onClick={() => setStep(4)}>Edit</button>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '13px' }}>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>CITY</span>
+                      <b style={{ color: '#0f172a' }}>{form.city || 'Not specified'}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>STREET ADDRESS / LANDMARK</span>
+                      <b style={{ color: '#0f172a' }}>{form.address || 'No street address specified'}</b>
+                    </div>
                   </div>
-                  <div className="review-item">
-                    <span>Media</span>
-                    <b>{form.image ? (isVideoUrl(form.image) ? '1 Video attached' : '1 Photo attached') : 'No media'}</b>
-                    <button type="button" className="btn-edit-step" onClick={() => setStep(3)}>Edit</button>
+                </div>
+
+                {/* 3. Venue Specifications & Amenities */}
+                <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Building2 size={17} color="#e11d48" /> 3. Specifications &amp; Amenities
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
                   </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '13px', marginBottom: '12px' }}>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>GUEST CAPACITY</span>
+                      <b style={{ color: '#0f172a', fontSize: '15px' }}>{Number(form.capacity).toLocaleString('en-IN')} Guests</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>SUITABLE FOR</span>
+                      <span style={{ color: '#334155' }}>Weddings, Conferences, Banquets, Social Events</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>AMENITIES INCLUDED</span>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {(form.amenities || '').split(',').map(a => a.trim()).filter(Boolean).map(item => (
+                        <span key={item} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600 }}>
+                          ✓ {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Photos & Videos */}
+                <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Image size={17} color="#e11d48" /> 4. Showcase Media
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setStep(3)}
+                      style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
+                  </div>
+                  {form.image ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                      <div style={{ width: '180px', height: '100px', borderRadius: '10px', overflow: 'hidden', border: '1px solid #cbd5e1', flexShrink: 0 }}>
+                        {isVideoUrl(form.image) ? (
+                          <video src={form.image} controls style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <img src={form.image} alt="Venue preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        )}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#475569' }}>
+                        <b style={{ color: '#047857', display: 'block', marginBottom: '2px' }}>
+                          ✓ {isVideoUrl(form.image) ? 'Venue video attached' : 'Venue photo uploaded'}
+                        </b>
+                        <span style={{ wordBreak: 'break-all', color: '#64748b' }}>{form.image.slice(0, 75)}...</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic', background: '#f8fafc', padding: '12px 14px', borderRadius: '8px' }}>
+                      No custom photo/video uploaded (optional). Default venue category visuals will be used.
+                    </div>
+                  )}
+                </div>
+
+                {/* 5. Pricing & Operating Timings */}
+                <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Settings size={17} color="#e11d48" /> 5. Pricing &amp; Operating Timings
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setStep(4)}
+                      style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    >
+                      <Edit3 size={13} /> Edit Timings &amp; Pricing
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', fontSize: '13px' }}>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>HOURLY RATE</span>
+                      <b style={{ color: '#0f172a', fontSize: '16px' }}>₹{Number(form.price || 0).toLocaleString('en-IN')} / hour</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>OPERATING TIMINGS</span>
+                      <b style={{ color: '#047857' }}>
+                        {form.is24Hours ? 'Open 24 Hours (Round the Clock)' : `${form.openingTime || '08:00'} ${form.openingAmPm || 'AM'} – ${form.closingTime || '11:00'} ${form.closingAmPm || 'PM'}`}
+                      </b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>AVAILABLE DAYS</span>
+                      <b style={{ color: '#0f172a' }}>{form.availableDays || 'All Days (Mon - Sun)'}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>MINIMUM BOOKING</span>
+                      <b style={{ color: '#334155' }}>{form.minBookingHours || '4'} Hours Minimum</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>ESTIMATED 8-HOUR DAY RATE</span>
+                      <b style={{ color: '#16a34a', fontSize: '15px' }}>₹{(Number(form.price || 0) * 8).toLocaleString('en-IN')}</b>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6. Verification Checkbox */}
+                <div style={{ background: detailsConfirmed ? '#ecfdf5' : '#fffbeb', border: `1.5px solid ${detailsConfirmed ? '#a7f3d0' : '#fde68a'}`, borderRadius: '14px', padding: '18px 22px', transition: 'all 0.2s ease' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      checked={detailsConfirmed}
+                      onChange={(e) => setDetailsConfirmed(e.target.checked)}
+                      style={{ width: '20px', height: '20px', marginTop: '2px', accentColor: '#16a34a', cursor: 'pointer' }}
+                    />
+                    <div>
+                      <b style={{ color: detailsConfirmed ? '#065f46' : '#92400e', fontSize: '14px', display: 'block' }}>
+                        ✓ I have checked all the venue details above and confirm they are accurate
+                      </b>
+                      <span style={{ fontSize: '12px', color: detailsConfirmed ? '#047857' : '#78350f', display: 'block', marginTop: '2px' }}>
+                        I verify that the venue name, address location, guest capacity, pricing rate, and amenities are correct and ready for platform review.
+                      </span>
+                    </div>
+                  </label>
                 </div>
               </div>
             )}
@@ -609,21 +1111,39 @@ export default function ListVenuePage() {
               </div>
             ) : null}
 
-            <div className="org-form-actions">
-              <button type="button" className="draft" disabled={saving} onClick={() => saveVenue(false)}>
-                {saving ? 'Saving…' : isVenueOwner ? 'Save as Draft' : 'Save Proposal Draft'}
-              </button>
+            <div className="org-form-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button type="button" className="draft" disabled={saving} onClick={() => saveVenue(false)}>
+                  {saving ? 'Saving…' : isVenueOwner ? 'Save as Draft' : 'Save Proposal Draft'}
+                </button>
+                {step > 0 && (
+                  <button
+                    type="button"
+                    className="draft"
+                    disabled={saving}
+                    onClick={() => setStep(step - 1)}
+                    style={{ background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1' }}
+                  >
+                    ← Previous Step
+                  </button>
+                )}
+              </div>
               <button
                 disabled={saving}
-                type={step === 5 ? 'submit' : 'button'}
+                type="button"
                 onClick={() => {
-                  if (step < 5) handleNextStep();
+                  if (step < 5) {
+                    handleNextStep();
+                  } else {
+                    setShowConfirmModal(true);
+                  }
                 }}
+                style={step === 5 ? { background: '#e11d48', color: '#fff' } : {}}
               >
                 {saving
                   ? 'Submitting…'
                   : step === 5
-                  ? (isVenueOwner ? 'Submit Venue' : 'Submit Partner Application')
+                  ? (isVenueOwner ? 'Check & Submit Venue →' : 'Check & Submit Application →')
                   : 'Next Step'} <ArrowRight />
               </button>
             </div>
@@ -714,6 +1234,153 @@ export default function ListVenuePage() {
           <button onClick={()=>document.querySelector('.lv-builder')?.scrollIntoView({behavior:'smooth'})}>List Your Venue <ArrowRight/></button>
         </section>
       </section>
+      {/* One-Time Checking & Confirmation Modal */}
+      {showConfirmModal && (
+        <div
+          className="org-confirm-modal-overlay"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999999,
+            padding: '20px',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !saving) setShowConfirmModal(false);
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '20px',
+              maxWidth: '540px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              border: '1px solid #e2e8f0',
+              padding: '28px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fef2f2', border: '1px solid #fecdd3', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#e11d48' }}>
+                  <CheckCircle2 size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                    One-Time Checking: Submit Venue?
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                    Final check of your details before submitting for verification
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setShowConfirmModal(false)}
+                style={{ background: '#f1f5f9', border: 0, width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', marginBottom: '18px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+                <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Venue Name:</span>
+                <b style={{ color: '#0f172a', textAlign: 'right', fontSize: '14px' }}>{form.name || 'Untitled'}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+                <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Venue Type:</span>
+                <b style={{ color: '#0f172a' }}>{form.type || 'Not selected'}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+                <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>City &amp; Address:</span>
+                <b style={{ color: '#0f172a', textAlign: 'right' }}>{form.city}{form.address ? `, ${form.address}` : ''}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+                <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Guest Capacity:</span>
+                <b style={{ color: '#047857' }}>{Number(form.capacity).toLocaleString('en-IN')} Guests</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+                <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Operating Timings:</span>
+                <b style={{ color: '#047857', textAlign: 'right' }}>
+                  {form.is24Hours ? 'Open 24 Hours' : `${form.openingTime || '08:00'} ${form.openingAmPm || 'AM'} – ${form.closingTime || '11:00'} ${form.closingAmPm || 'PM'}`} ({form.availableDays || 'All Days'})
+                </b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+                <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Hourly Rate:</span>
+                <b style={{ color: '#b45309' }}>₹{Number(form.price || 0).toLocaleString('en-IN')} / hour (Min {form.minBookingHours || '4'} hrs)</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Amenities:</span>
+                <span style={{ color: '#0f172a', fontWeight: 600, textAlign: 'right' }}>
+                  {form.amenities || 'None specified'}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '12px 14px', marginBottom: '20px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+              <ShieldCheck size={18} color="#059669" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <span style={{ fontSize: '12px', color: '#065f46', lineHeight: 1.4 }}>
+                Submitting will send this venue to Platform Administrators for verification. Once approved, your venue will appear publicly for event organizers to book.
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', alignItems: 'center' }}>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setShowConfirmModal(false)}
+                style={{
+                  background: '#f1f5f9',
+                  color: '#475569',
+                  border: '1px solid #cbd5e1',
+                  padding: '11px 20px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ← Back to Review
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  saveVenue(true);
+                }}
+                style={{
+                  background: '#e11d48',
+                  color: '#ffffff',
+                  border: 0,
+                  padding: '11px 24px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(225, 29, 72, 0.3)',
+                }}
+              >
+                {saving ? 'Submitting…' : '✓ Yes, Confirm & Submit Venue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <SiteFooter/>
     </div>
   );

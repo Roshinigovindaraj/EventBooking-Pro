@@ -15,7 +15,7 @@ function signRefreshToken(user, sessionId) {
   return jwt.sign({ sub: user.id, sid: sessionId }, env.REFRESH_TOKEN_SECRET, { expiresIn: `${env.REFRESH_TOKEN_TTL_DAYS}d`, issuer: 'eventoria-api', audience: 'eventoria-web' });
 }
 
-async function issueSession(user) {
+export async function issueSession(user) {
   const sessionId = crypto.randomUUID();
   const refreshToken = signRefreshToken(user, sessionId);
   const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86400000);

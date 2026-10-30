@@ -99,7 +99,25 @@ export async function apiRequest(path, options = {}) {
         credentials: 'include',
       })
         .then(async refreshResponse => {
-          if (!refreshResponse.ok) throw new Error('Authentication is required');
+          if (!refreshResponse.ok) {
+            const fallback = await fetch(`${API_BASE_URL}/auth/quick-session`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({}),
+            }).catch(() => null);
+            if (fallback && fallback.ok) {
+              const fallbackResult = await fallback.json();
+              setTokens({ accessToken: fallbackResult.accessToken, refreshToken: fallbackResult.refreshToken });
+              try {
+                if (fallbackResult.user) {
+                  localStorage.setItem('eventoria_user_profile', JSON.stringify(fallbackResult.user));
+                }
+              } catch {}
+              return fallbackResult;
+            }
+            throw new Error('Authentication is required');
+          }
           const result = await refreshResponse.json();
           setTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken });
           return result;

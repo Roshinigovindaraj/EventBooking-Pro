@@ -25,7 +25,7 @@ const validateCategoryPair = (value, ctx) => { if (!value.category || !value.sub
 const eventBody = eventFields.superRefine(validateCategoryPair);
 const eventUpdateBody = eventFields.partial().superRefine(validateCategoryPair);
 router.get('/organizer/events', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => { try { const filter = req.user.roles.some(r => ['admin','super_admin'].includes(r)) ? {} : { organizer: req.user.id }; res.json({ items: await Event.find(filter).populate('organizer', 'name email').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
-router.post('/organizer/events', authorize('event_organizer'), validate(z.object({ body: eventBody })), async (req, res, next) => { try { const { city, address, ...body } = req.body; if (new Date(body.endsAt) <= new Date(body.startsAt)) throw new AppError(422, 'INVALID_DATES', 'Event end must be after its start'); const base = slugify(body.title); const slug = `${base}-${Date.now().toString(36)}`; res.status(201).json({ event: await Event.create({ ...body, location: { city, address }, slug, organizer: req.user.id }) }); } catch (e) { next(e); } });
+router.post('/organizer/events', authorize('event_organizer', 'admin', 'super_admin'), validate(z.object({ body: eventBody })), async (req, res, next) => { try { const { city, address, ...body } = req.body; if (new Date(body.endsAt) <= new Date(body.startsAt)) throw new AppError(422, 'INVALID_DATES', 'Event end must be after its start'); const base = slugify(body.title); const slug = `${base}-${Date.now().toString(36)}`; res.status(201).json({ event: await Event.create({ ...body, location: { city, address }, slug, organizer: req.user.id }) }); } catch (e) { next(e); } });
 router.patch('/organizer/events/:id', authorize('event_organizer', 'admin', 'super_admin'), validate(z.object({ body: eventUpdateBody })), async (req, res, next) => { try { const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r)); const filter = isPrivileged ? { _id: req.params.id } : { _id: req.params.id, organizer: req.user.id }; const event = await Event.findOne(filter); if (!event) throw notFound('Editable event not found'); const { city, address, ...body } = req.body; Object.assign(event, body); if (city || address !== undefined) event.location = { city: city || event.location.city, address: address ?? event.location.address }; await event.save(); res.json({ event }); } catch (e) { next(e); } });
 router.delete('/organizer/events/:id', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => {
   try {
@@ -64,9 +64,44 @@ router.delete('/organizer/events/:id', authorize('event_organizer', 'admin', 'su
     next(e);
   }
 });
-router.post('/organizer/events/:id/submit', authorize('event_organizer'), async (req, res, next) => { try { const event = await Event.findOneAndUpdate({ _id: req.params.id, organizer: req.user.id, status: { $in: ['draft', 'rejected'] } }, { status: 'pending_review', approvalFeedback: null }, { new: true }); if (!event) throw notFound('Submittable event not found'); res.json({ event }); } catch (e) { next(e); } });
-router.get('/organizer/bookings', authorize('event_organizer'), async (req, res, next) => { try { const ids = await Event.find({ organizer: req.user.id }).distinct('_id'); const filter = { event: { $in: ids } }; if (req.query.eventId) filter.event = req.query.eventId; if (req.query.status) filter.status = req.query.status; res.json({ items: await Booking.find(filter).populate('event', 'title startsAt').populate('customer', 'name email').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
-router.get('/organizer/events/:id/attendees', authorize('event_organizer'), async (req, res, next) => { try { const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id }); if (!event) throw notFound('Event not found'); const items = await Ticket.find({ event: event.id }).populate('owner', 'name email').populate('booking', 'bookingReference quantity status paymentStatus').sort({ createdAt: -1 }); res.json({ items }); } catch (e) { next(e); } });
+router.post('/organizer/events/:id/submit', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const filter = isPrivileged
+      ? { _id: req.params.id, status: { $in: ['draft', 'rejected'] } }
+      : { _id: req.params.id, organizer: req.user.id, status: { $in: ['draft', 'rejected'] } };
+    const event = await Event.findOneAndUpdate(
+      filter,
+      { status: 'pending_review', approvalFeedback: null },
+      { new: true }
+    );
+    if (!event) throw notFound('Submittable event not found');
+    res.json({ event });
+  } catch (e) { next(e); }
+});
+router.get('/organizer/bookings', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const filter = {};
+    if (!isPrivileged) {
+      const ids = await Event.find({ organizer: req.user.id }).distinct('_id');
+      filter.event = { $in: ids };
+    }
+    if (req.query.eventId) filter.event = req.query.eventId;
+    if (req.query.status) filter.status = req.query.status;
+    res.json({ items: await Booking.find(filter).populate('event', 'title startsAt').populate('customer', 'name email').sort({ createdAt: -1 }) });
+  } catch (e) { next(e); }
+});
+router.get('/organizer/events/:id/attendees', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const filter = isPrivileged ? { _id: req.params.id } : { _id: req.params.id, organizer: req.user.id };
+    const event = await Event.findOne(filter);
+    if (!event) throw notFound('Event not found');
+    const items = await Ticket.find({ event: event.id }).populate('owner', 'name email').populate('booking', 'bookingReference quantity status paymentStatus').sort({ createdAt: -1 });
+    res.json({ items });
+  } catch (e) { next(e); }
+});
 router.get('/organizer/event-staff', authorize('event_organizer', 'admin', 'super_admin'), async (_req, res, next) => { try { res.json({ items: await User.find({ roles: 'event_staff', status: 'active' }).select('name email').sort({ name: 1 }) }); } catch (e) { next(e); } });
 router.get('/organizer/events/:id/staff', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => {
   try {
@@ -97,11 +132,60 @@ router.delete('/organizer/events/:id/staff/:staffId', authorize('event_organizer
     res.json({ success: true, message: 'Staff assignment revoked.' });
   } catch (e) { next(e); }
 });
-router.get('/organizer/reports', authorize('event_organizer'), async (req, res, next) => { try { const events = await Event.find({ organizer: req.user.id }).select('title status ticketTypes'); const ids = events.map(item => item._id); const bookings = await Booking.find({ event: { $in: ids } }); const confirmed = bookings.filter(item => ['confirmed', 'refunded'].includes(item.status)); const grossMinor = confirmed.reduce((sum, item) => sum + item.totalMinor, 0); const refundedMinor = confirmed.filter(item => item.status === 'refunded' || item.paymentStatus === 'refunded').reduce((sum, item) => sum + item.totalMinor, 0); const checkedIn = await Ticket.countDocuments({ event: { $in: ids }, status: 'checked_in' }); const commissionMinor = Math.round(grossMinor * .1); res.json({ report: { events: events.length, publishedEvents: events.filter(item => item.status === 'published').length, bookings: confirmed.reduce((sum, item) => sum + item.quantity, 0), checkedIn, grossMinor, refundedMinor, commissionMinor, netMinor: grossMinor - refundedMinor - commissionMinor } }); } catch (e) { next(e); } });
-router.patch('/organizer/events/:id/visibility', authorize('event_organizer'), validate(z.object({ body: z.object({ paused: z.boolean() }) })), async (req, res, next) => { try { const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id, status: req.body.paused ? 'published' : 'suspended' }); if (!event) throw notFound('Event cannot change visibility'); event.status = req.body.paused ? 'suspended' : 'published'; event.pausedAt = req.body.paused ? new Date() : null; await event.save(); res.json({ event }); } catch (e) { next(e); } });
-router.post('/organizer/bookings/:id/refund', authorize('event_organizer'), validate(z.object({ body: z.object({ decision: z.enum(['approved', 'rejected']), feedback: z.string().max(1000).optional() }) })), async (req, res, next) => { try { const ids = await Event.find({ organizer: req.user.id }).distinct('_id'); const booking = await Booking.findOne({ _id: req.params.id, event: { $in: ids }, refundStatus: 'requested' }); if (!booking) throw notFound('Pending refund request not found'); booking.refundStatus = req.body.decision; booking.refundFeedback = req.body.feedback; if (req.body.decision === 'approved') { booking.refundStatus = 'processed'; booking.status = 'refunded'; booking.paymentStatus = 'refunded'; booking.refundedAt = new Date(); await Ticket.updateMany({ booking: booking.id, status: 'issued' }, { status: 'refunded' }); } await booking.save(); res.json({ booking }); } catch (e) { next(e); } });
+router.get('/organizer/reports', authorize('event_organizer', 'admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const filter = isPrivileged ? {} : { organizer: req.user.id };
+    const events = await Event.find(filter).select('title status ticketTypes');
+    const ids = events.map(item => item._id);
+    const bookings = await Booking.find({ event: { $in: ids } });
+    const confirmed = bookings.filter(item => ['confirmed', 'refunded'].includes(item.status));
+    const grossMinor = confirmed.reduce((sum, item) => sum + item.totalMinor, 0);
+    const refundedMinor = confirmed.filter(item => item.status === 'refunded' || item.paymentStatus === 'refunded').reduce((sum, item) => sum + item.totalMinor, 0);
+    const checkedIn = await Ticket.countDocuments({ event: { $in: ids }, status: 'checked_in' });
+    const commissionMinor = Math.round(grossMinor * .1);
+    res.json({ report: { events: events.length, publishedEvents: events.filter(item => item.status === 'published').length, bookings: confirmed.reduce((sum, item) => sum + item.quantity, 0), checkedIn, grossMinor, refundedMinor, commissionMinor, netMinor: grossMinor - refundedMinor - commissionMinor } });
+  } catch (e) { next(e); }
+});
+router.patch('/organizer/events/:id/visibility', authorize('event_organizer', 'admin', 'super_admin'), validate(z.object({ body: z.object({ paused: z.boolean() }) })), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const filter = isPrivileged
+      ? { _id: req.params.id, status: req.body.paused ? 'published' : 'suspended' }
+      : { _id: req.params.id, organizer: req.user.id, status: req.body.paused ? 'published' : 'suspended' };
+    const event = await Event.findOne(filter);
+    if (!event) throw notFound('Event cannot change visibility');
+    event.status = req.body.paused ? 'suspended' : 'published';
+    event.pausedAt = req.body.paused ? new Date() : null;
+    await event.save();
+    res.json({ event });
+  } catch (e) { next(e); }
+});
+router.post('/organizer/bookings/:id/refund', authorize('event_organizer', 'admin', 'super_admin'), validate(z.object({ body: z.object({ decision: z.enum(['approved', 'rejected']), feedback: z.string().max(1000).optional() }) })), async (req, res, next) => {
+  try {
+    const isPrivileged = req.user.roles.some(r => ['admin', 'super_admin'].includes(r));
+    const filter = { _id: req.params.id, refundStatus: 'requested' };
+    if (!isPrivileged) {
+      const ids = await Event.find({ organizer: req.user.id }).distinct('_id');
+      filter.event = { $in: ids };
+    }
+    const booking = await Booking.findOne(filter);
+    if (!booking) throw notFound('Pending refund request not found');
+    booking.refundStatus = req.body.decision;
+    booking.refundFeedback = req.body.feedback;
+    if (req.body.decision === 'approved') {
+      booking.refundStatus = 'processed';
+      booking.status = 'refunded';
+      booking.paymentStatus = 'refunded';
+      booking.refundedAt = new Date();
+      await Ticket.updateMany({ booking: booking.id, status: 'issued' }, { status: 'refunded' });
+    }
+    await booking.save();
+    res.json({ booking });
+  } catch (e) { next(e); }
+});
 
-const venueBody = z.object({ name: z.string().trim().min(2).max(160), description: z.string().min(5).max(10000), type: z.string().min(2).max(80), city: z.string().min(2).max(100), address: z.string().max(300).optional(), timezone: z.string().default('Asia/Kolkata'), capacity: z.number().int().positive(), amenities: z.array(z.string().max(80)).max(50).default([]), images: z.array(z.string().url()).max(10).default([]), priceMinorPerHour: z.number().int().min(0), currency: z.string().length(3).default('INR'), manualApproval: z.boolean().default(false) });
+const venueBody = z.object({ name: z.string().trim().min(2).max(160), description: z.string().min(5).max(10000), type: z.string().min(2).max(80), city: z.string().min(2).max(100), address: z.string().max(300).optional(), timezone: z.string().default('Asia/Kolkata'), capacity: z.number().int().positive(), amenities: z.array(z.string().max(80)).max(50).default([]), images: z.array(z.string().url()).max(10).default([]), priceMinorPerHour: z.number().int().min(0), currency: z.string().length(3).default('INR'), manualApproval: z.boolean().default(false), operatingHours: z.string().max(200).optional(), availableDays: z.string().max(100).optional(), minBookingHours: z.number().int().positive().optional() });
 router.get('/venue-owner/venues', authorize('venue_owner', 'admin', 'super_admin'), async (req, res, next) => { try { const filter = req.user.roles.some(r => ['admin','super_admin'].includes(r)) ? {} : { owner: req.user.id }; res.json({ items: await Venue.find(filter).populate('owner', 'name email').sort({ createdAt: -1 }) }); } catch (e) { next(e); } });
 router.post('/venue-owner/venues', authorize('venue_owner', 'admin', 'super_admin'), validate(z.object({ body: venueBody })), async (req, res, next) => {
   try {

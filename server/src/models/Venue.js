@@ -14,10 +14,12 @@ const venueSchema = new mongoose.Schema({
   priceMinorPerHour: { type: Number, required: true, min: 0 },
   currency: { type: String, default: 'INR' },
   manualApproval: { type: Boolean, default: false },
+  operatingHours: { type: String, default: '08:00 AM – 11:00 PM' },
+  availableDays: { type: String, default: 'All Days (Mon - Sun)' },
+  minBookingHours: { type: Number, default: 4 },
   status: { type: String, enum: ['draft', 'pending_review', 'approved', 'published', 'rejected', 'suspended'], default: 'draft', index: true },
   approvalFeedback: String,
 }, { timestamps: true });
 
 venueSchema.index({ name: 'text', description: 'text', type: 'text', 'location.city': 'text' });
 export const Venue = mongoose.model('Venue', venueSchema);
-

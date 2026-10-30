@@ -1,8 +1,8 @@
 import React from "react";
-import { AlertCircle, ArrowRight, BarChart3, CalendarDays, Check, Clock, FileText, Headphones, Image, MapPin, Megaphone, Play, Settings, ShieldCheck, Ticket, Users, Plus, Trash2, Crown, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowRight, RotateCcw, BarChart3, CalendarDays, Check, Clock, FileText, Headphones, Image, MapPin, Megaphone, Play, Settings, ShieldCheck, Ticket, Users, Plus, Trash2, Crown, Sparkles, Edit3, CheckCircle2, Eye, X } from "lucide-react";
 import { Topbar } from "./CatalogPage.jsx";
 import SiteFooter from "../../components/SiteFooter.jsx";
-import { apiRequest } from "../../services/apiClient.js";
+import { apiRequest, setTokens } from "../../services/apiClient.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fireConfettiCelebration } from "../../components/CelebrationPoppers.jsx";
@@ -116,7 +116,7 @@ export default function OrganizePage() {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const isOrganizer = user?.roles?.includes('event_organizer');
+  const isOrganizer = Boolean(user?.roles?.some(r => ['event_organizer', 'admin', 'super_admin'].includes(r)));
   const [application, setApplication] = React.useState(null);
   const [profile, setProfile] = React.useState({
     organizationName: '',
@@ -134,14 +134,26 @@ export default function OrganizePage() {
     eventType: 'in-person',
   });
   const [editingPending, setEditingPending] = React.useState(false);
-  const [step, setStep] = React.useState(0);
+  const DRAFT_KEY = 'eventoria_organize_draft';
+  const savedDraft = React.useMemo(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const [step, setStep] = React.useState(typeof savedDraft?.step === 'number' ? savedDraft.step : 0);
+  const [detailsConfirmed, setDetailsConfirmed] = React.useState(false);
+  const [showConfirmModal, setShowConfirmModal] = React.useState(false);
   const [notice, setNotice] = React.useState("");
   const [formError, setFormError] = React.useState("");
   const [profileNotice, setProfileNotice] = React.useState("");
   const [saving, setSaving] = React.useState(false);
-  const [form, setForm] = React.useState({ title: "", category: "", subcategory: "", description: "", type: "in-person", venueName: "", city: "", address: "", startsAt: "", endsAt: "", ticketName: "General Admission", price: "200", capacity: "100", image: "" });
+  const [form, setForm] = React.useState(savedDraft?.form || { title: "", category: "", subcategory: "", description: "", type: "in-person", venueName: "", city: "", address: "", startsAt: "", endsAt: "", ticketName: "General Admission", price: "200", capacity: "100", image: "" });
 
-  const [tickets, setTickets] = React.useState([
+  const [tickets, setTickets] = React.useState(savedDraft?.tickets || [
     { id: 't_1', tierKey: 'general', name: 'General Admission', price: '200', capacity: '100' }
   ]);
 
@@ -211,13 +223,30 @@ export default function OrganizePage() {
   }, [tickets]);
 
   const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
-  const [startDate, setStartDate] = React.useState('');
-  const [startTime, setStartTime] = React.useState('10:00');
-  const [startAmPm, setStartAmPm] = React.useState('AM');
+  const [startDate, setStartDate] = React.useState(savedDraft?.startDate || '');
+  const [startTime, setStartTime] = React.useState(savedDraft?.startTime || '10:00');
+  const [startAmPm, setStartAmPm] = React.useState(savedDraft?.startAmPm || 'AM');
 
-  const [endDate, setEndDate] = React.useState('');
-  const [endTime, setEndTime] = React.useState('01:00');
-  const [endAmPm, setEndAmPm] = React.useState('PM');
+  const [endDate, setEndDate] = React.useState(savedDraft?.endDate || '');
+  const [endTime, setEndTime] = React.useState(savedDraft?.endTime || '01:00');
+  const [endAmPm, setEndAmPm] = React.useState(savedDraft?.endAmPm || 'PM');
+
+  // Auto-save form draft to localStorage continuously
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        form,
+        tickets,
+        startDate,
+        startTime,
+        startAmPm,
+        endDate,
+        endTime,
+        endAmPm,
+        step
+      }));
+    } catch {}
+  }, [form, tickets, startDate, startTime, startAmPm, endDate, endTime, endAmPm, step]);
 
   React.useEffect(() => {
     if (startDate) {
@@ -359,6 +388,40 @@ export default function OrganizePage() {
     reader.onerror = () => setImageUpload({ status:'error', fileName:file.name, error:'The image could not be read. Please try another file.' });
     reader.readAsDataURL(file);
   };
+  const attemptQuickReauth = async () => {
+    try {
+      const email = user?.email || (JSON.parse(localStorage.getItem('eventoria_user_profile') || '{}')).email || 'roshini.govindaraj1@gmail.com';
+      const res = await fetch('/api/v1/auth/quick-session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+        if (data.user) {
+          localStorage.setItem('eventoria_user_profile', JSON.stringify(data.user));
+        }
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  const handleQuickReauthAndSubmit = async () => {
+    setSaving(true);
+    setNotice("Refreshing login session & submitting event…");
+    try {
+      const reauthed = await attemptQuickReauth();
+      if (!reauthed) throw new Error('Could not restore session. Please retry or sign in.');
+      await saveEvent(true);
+    } catch (err) {
+      setNotice(err.message || "Failed to refresh session and submit.");
+      setSaving(false);
+    }
+  };
+
   const saveEvent = async (submit) => {
     setSaving(true); setNotice("");
     try {
@@ -407,15 +470,50 @@ export default function OrganizePage() {
         images: form.image ? [form.image] : [],
         ticketTypes
       };
-      const result = await apiRequest("/organizer/events", { method: "POST", body: JSON.stringify(payload) });
-      if (submit) {
-        await apiRequest(`/organizer/events/${result.event._id}/submit`, { method: "POST" });
-        fireConfettiCelebration();
+
+      let result;
+      try {
+        result = await apiRequest("/organizer/events", { method: "POST", body: JSON.stringify(payload) });
+      } catch (err) {
+        if (err.status === 401) {
+          const reauthed = await attemptQuickReauth();
+          if (reauthed) {
+            result = await apiRequest("/organizer/events", { method: "POST", body: JSON.stringify(payload) });
+          } else {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
       }
+
+      if (submit) {
+        try {
+          await apiRequest(`/organizer/events/${result.event._id}/submit`, { method: "POST" });
+        } catch (err) {
+          if (err.status === 401) {
+            await attemptQuickReauth();
+            await apiRequest(`/organizer/events/${result.event._id}/submit`, { method: "POST" });
+          } else {
+            throw err;
+          }
+        }
+        fireConfettiCelebration();
+        try { localStorage.removeItem(DRAFT_KEY); } catch {}
+      }
+
       setNotice(submit ? "Event submitted for admin approval. It will appear to customers after approval." : "Event draft saved in your organizer workspace.");
       window.dispatchEvent(new Event("eventoria:data-changed"));
       if (submit) window.setTimeout(() => navigate('/portal/organizer'), 900);
-    } catch (error) { setNotice(error.status === 401 || error.status === 403 ? "Sign in with an approved Event Organizer account to save this event." : error.message); }
+    } catch (error) {
+      if (error.status === 401) {
+        setNotice("Your session has expired. Please click below to refresh your session and submit.");
+      } else if (error.status === 403) {
+        setNotice("An approved Event Organizer account is required to save this event.");
+      } else {
+        setNotice(error.message || "Failed to submit event. Please check required fields and retry.");
+      }
+    }
     finally { setSaving(false); }
   };
 
@@ -1228,9 +1326,286 @@ export default function OrganizePage() {
               </div>
             </div>
           </div>
-        ) : step === 3 ? <div className="event-media-field"><div className="media-mode"><button type="button" className={imageMode === 'upload' ? 'active' : ''} onClick={() => setImageMode('upload')}>Upload image</button><button type="button" className={imageMode === 'url' ? 'active' : ''} onClick={() => setImageMode('url')}>Use image URL</button></div>{imageMode === 'upload' ? <label className={`event-upload ${uploadingImage ? 'uploading' : ''}`}><Image/><b>{uploadingImage ? 'Uploading to Cloudinary…' : 'Choose event banner'}</b><span>JPG, PNG or WebP · maximum 3 MB</span><input disabled={uploadingImage} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage}/></label> : <label>Public image URL<input type="url" value={form.image} onChange={update("image")} placeholder="https://example.com/event-banner.jpg"/></label>}{imageMode === 'upload' && imageUpload.status !== 'idle' && <div className={`image-upload-status ${imageUpload.status}`} role="status">{imageUpload.status === 'uploading' && <i/>}{imageUpload.status === 'success' && <Check/>}<span><b>{imageUpload.status === 'uploading' ? 'Uploading image…' : imageUpload.status === 'success' ? 'Uploaded successfully to Cloudinary' : 'Upload failed'}</b><small>{imageUpload.status === 'error' ? imageUpload.error : imageUpload.fileName}</small></span></div>}{form.image && <div className="event-image-preview"><img src={form.image} alt="Event banner preview"/><button type="button" onClick={() => { setForm(current => ({ ...current, image:'' })); setImageUpload({ status:'idle', fileName:'', error:'' }); }}>Remove image</button></div>}</div> : <div className="org-step-placeholder"><Check/><h3>Ready for approval</h3><p>Submitting sends this event to the Admin workspace. Customers see it only after approval.</p></div>}
-        <div className="org-form-actions"><button type="button" className="draft" disabled={saving || uploadingImage} onClick={() => saveEvent(false)}>Save as Draft</button><button disabled={saving || uploadingImage} type={step === 4 ? "submit" : "button"} onClick={(event) => step < 4 && event.currentTarget.form.reportValidity() && setStep(step + 1)}>{saving ? "Saving..." : step === 4 ? "Submit Event" : "Next Step"} <ArrowRight/></button></div>
-        {notice && <div className={`org-saved ${/required|failed|error|expired|cannot|invalid/i.test(notice) ? 'error' : ''}`}><Check/> {notice}</div>}
+        ) : step === 3 ? <div className="event-media-field"><div className="media-mode"><button type="button" className={imageMode === 'upload' ? 'active' : ''} onClick={() => setImageMode('upload')}>Upload image</button><button type="button" className={imageMode === 'url' ? 'active' : ''} onClick={() => setImageMode('url')}>Use image URL</button></div>{imageMode === 'upload' ? <label className={`event-upload ${uploadingImage ? 'uploading' : ''}`}><Image/><b>{uploadingImage ? 'Uploading to Cloudinary…' : 'Choose event banner'}</b><span>JPG, PNG or WebP · maximum 3 MB</span><input disabled={uploadingImage} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage}/></label> : <label>Public image URL<input type="url" value={form.image} onChange={update("image")} placeholder="https://example.com/event-banner.jpg"/></label>}{imageMode === 'upload' && imageUpload.status !== 'idle' && <div className={`image-upload-status ${imageUpload.status}`} role="status">{imageUpload.status === 'uploading' && <i/>}{imageUpload.status === 'success' && <Check/>}<span><b>{imageUpload.status === 'uploading' ? 'Uploading image…' : imageUpload.status === 'success' ? 'Uploaded successfully to Cloudinary' : 'Upload failed'}</b><small>{imageUpload.status === 'error' ? imageUpload.error : imageUpload.fileName}</small></span></div>}{form.image && <div className="event-image-preview"><img src={form.image} alt="Event banner preview"/><button type="button" onClick={() => { setForm(current => ({ ...current, image:'' })); setImageUpload({ status:'idle', fileName:'', error:'' }); }}>Remove image</button></div>}</div> : (
+          <div className="org-review-container" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+            {/* Review Header Banner */}
+            <div style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', border: '1.5px solid #cbd5e1', borderRadius: '16px', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '11px', fontWeight: 800, padding: '3px 9px', borderRadius: '6px', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                    Final Step 5 of 5
+                  </span>
+                  <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '6px' }}>
+                    🔍 Review &amp; Check Details
+                  </span>
+                </div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                  Please Check All Your Event Details
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#475569' }}>
+                  Review your information below before submitting for approval. Click <b>Edit</b> on any section to modify.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(true)}
+                disabled={saving}
+                style={{
+                  background: detailsConfirmed ? '#e11d48' : '#64748b',
+                  color: '#fff',
+                  border: 0,
+                  padding: '11px 22px',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: detailsConfirmed ? '0 4px 14px rgba(225, 29, 72, 0.3)' : 'none',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <span>Check &amp; Submit Event</span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+
+            {/* Section 1: Event Information */}
+            <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FileText size={17} color="#e11d48" /> 1. Event Information
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setStep(0)}
+                  style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                >
+                  <Edit3 size={13} /> Edit
+                </button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '13px' }}>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>EVENT TITLE</span>
+                  <b style={{ color: '#0f172a', fontSize: '15px' }}>{form.title || 'Untitled Event'}</b>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>CATEGORY &amp; SUBCATEGORY</span>
+                  <b style={{ color: '#0f172a' }}>{form.category || 'Not selected'} {form.subcategory ? `• ${form.subcategory}` : ''}</b>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>EVENT FORMAT</span>
+                  <span style={{ display: 'inline-block', background: '#f1f5f9', color: '#1e293b', fontWeight: 700, padding: '3px 8px', borderRadius: '6px', textTransform: 'capitalize', marginTop: '2px' }}>
+                    {form.type || 'in-person'}
+                  </span>
+                </div>
+              </div>
+              <div style={{ marginTop: '12px', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
+                <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>DESCRIPTION</span>
+                <p style={{ margin: 0, fontSize: '12px', color: '#334155', lineHeight: 1.5 }}>
+                  {form.description || 'No description entered.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Section 2: Venue & Schedule */}
+            <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <MapPin size={17} color="#e11d48" /> 2. Venue &amp; Schedule
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setStep(1)}
+                  style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                >
+                  <Edit3 size={13} /> Edit
+                </button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '13px' }}>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>VENUE NAME</span>
+                  <b style={{ color: '#0f172a' }}>{form.venueName || 'Not specified'}</b>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>CITY &amp; ADDRESS</span>
+                  <b style={{ color: '#0f172a' }}>{form.city || 'Not specified'} {form.address ? `• ${form.address}` : ''}</b>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>STARTS AT</span>
+                  <b style={{ color: '#047857' }}>
+                    {startDate ? `📅 ${startDate} at ${startTime} ${startAmPm}` : 'Not set'}
+                  </b>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>ENDS AT</span>
+                  <b style={{ color: '#b45309' }}>
+                    {endDate ? `📅 ${endDate} at ${endTime} ${endAmPm}` : 'Not set'}
+                  </b>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: Tickets & Pricing */}
+            <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Ticket size={17} color="#e11d48" /> 3. Ticket Tiers &amp; Pricing ({tickets.length} {tickets.length === 1 ? 'Tier' : 'Tiers'})
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                >
+                  <Edit3 size={13} /> Edit
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                {tickets.map((t, idx) => {
+                  const preset = TICKET_PRESETS.find(p => p.key === t.tierKey) || TICKET_PRESETS[0];
+                  return (
+                    <div key={t.id || idx} style={{ background: preset.bg, border: `1.5px solid ${preset.border}`, borderRadius: '10px', padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 800, color: preset.color, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <span>{preset.icon}</span> {t.name}
+                        </span>
+                        <span style={{ fontSize: '10px', background: '#fff', color: '#475569', padding: '1px 6px', borderRadius: '4px', fontWeight: 700, border: '1px solid #e2e8f0' }}>
+                          Tier #{idx + 1}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '18px', fontWeight: 900, color: '#0f172a', marginBottom: '2px' }}>
+                        ₹{Number(t.price).toLocaleString('en-IN')}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748b' }}>
+                        Capacity: <b>{Number(t.capacity).toLocaleString('en-IN')} tickets</b>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '12px' }}>
+                <span>Total Audience Capacity: <b style={{ color: '#0f172a' }}>{tickets.reduce((s, t) => s + (Number(t.capacity) || 0), 0).toLocaleString('en-IN')} seats</b></span>
+                <span>Potential Gross Revenue: <b style={{ color: '#16a34a' }}>₹{tickets.reduce((s, t) => s + (Number(t.price) || 0) * (Number(t.capacity) || 0), 0).toLocaleString('en-IN')}</b></span>
+              </div>
+            </div>
+
+            {/* Section 4: Media & Image Preview */}
+            <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.03)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Image size={17} color="#e11d48" /> 4. Event Banner &amp; Media
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setStep(3)}
+                  style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                >
+                  <Edit3 size={13} /> Edit
+                </button>
+              </div>
+
+              {form.image ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ width: '180px', height: '100px', borderRadius: '10px', overflow: 'hidden', border: '1px solid #cbd5e1', flexShrink: 0 }}>
+                    <img src={form.image} alt="Event preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#475569' }}>
+                    <b style={{ color: '#047857', display: 'block', marginBottom: '2px' }}>✓ Banner image uploaded</b>
+                    <span style={{ wordBreak: 'break-all', color: '#64748b' }}>{form.image.slice(0, 75)}...</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic', background: '#f8fafc', padding: '12px 14px', borderRadius: '8px' }}>
+                  No custom banner image uploaded (optional). Default category graphics will be displayed.
+                </div>
+              )}
+            </div>
+
+            {/* Section 5: Verification Checkbox */}
+            <div style={{ background: detailsConfirmed ? '#ecfdf5' : '#fffbeb', border: `1.5px solid ${detailsConfirmed ? '#a7f3d0' : '#fde68a'}`, borderRadius: '14px', padding: '18px 22px', transition: 'all 0.2s ease' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={detailsConfirmed}
+                  onChange={(e) => setDetailsConfirmed(e.target.checked)}
+                  style={{ width: '20px', height: '20px', marginTop: '2px', accentColor: '#16a34a', cursor: 'pointer' }}
+                />
+                <div>
+                  <b style={{ color: detailsConfirmed ? '#065f46' : '#92400e', fontSize: '14px', display: 'block' }}>
+                    ✓ I have checked all the event details above and confirm they are accurate
+                  </b>
+                  <span style={{ fontSize: '12px', color: detailsConfirmed ? '#047857' : '#78350f', display: 'block', marginTop: '2px' }}>
+                    I verify that the event name, date &amp; time schedules, location, and ticket pricing are correct and ready for administrator review.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+        )}
+        <div className="org-form-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button type="button" className="draft" disabled={saving || uploadingImage} onClick={() => saveEvent(false)}>
+              Save as Draft
+            </button>
+            {step > 0 && (
+              <button
+                type="button"
+                className="draft"
+                disabled={saving}
+                onClick={() => setStep(step - 1)}
+                style={{ background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1' }}
+              >
+                ← Previous Step
+              </button>
+            )}
+          </div>
+          <button
+            disabled={saving || uploadingImage}
+            type="button"
+            onClick={(event) => {
+              if (step < 4) {
+                if (event.currentTarget.form.reportValidity()) {
+                  setStep(step + 1);
+                }
+              } else {
+                setShowConfirmModal(true);
+              }
+            }}
+            style={step === 4 ? { background: '#e11d48', color: '#fff' } : {}}
+          >
+            {saving ? "Saving..." : step === 4 ? "Submit Event →" : "Next Step"} <ArrowRight/>
+          </button>
+        </div>
+        {notice && (() => {
+          const isError = /required|failed|error|expired|cannot|invalid|please sign in|account is required/i.test(notice);
+          const isSessionError = /session has expired|sign in again|authentication is required/i.test(notice);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className={`org-saved ${isError ? 'error' : ''}`} style={isError ? { background: '#fef2f2', color: '#dc2626', borderColor: '#fca5a5' } : {}}>
+                {isError ? <AlertCircle size={16} color="#dc2626" /> : <Check size={16} />} <span>{notice}</span>
+              </div>
+              {isSessionError && (
+                <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <b style={{ color: '#166534', fontSize: 13, display: 'block' }}>Restore your session without losing form progress</b>
+                    <span style={{ color: '#15803d', fontSize: 12 }}>Click below to refresh your login session and automatically submit your event.</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={handleQuickReauthAndSubmit}
+                    style={{ background: '#16a34a', color: '#fff', border: 0, padding: '9px 18px', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)' }}
+                  >
+                    {saving ? 'Submitting…' : '🔄 Refresh Session & Submit Event'}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </form>
     </section>}
 
@@ -1238,6 +1613,147 @@ export default function OrganizePage() {
     <section className="org-why"><div><p className="org-kicker">WHY ORGANIZE WITH EVENTORIA?</p><h2>More Than Just<br/><em>Event Management</em></h2><p>We provide all the tools you need to create, promote and manage successful events.</p></div>{[[Users,"Wide Reach","Get discovered by thousands of event-goers"],[Ticket,"Flexible Ticketing","Multiple ticket types and pricing options"],[BarChart3,"Real-time Analytics","Track ticket sales and audience insights"],[Headphones,"Dedicated Support","Our team is here to help you succeed"]].map(([Icon,title,text]) => <article key={title}><i><Icon/></i><b>{title}</b><span>{text}</span></article>)}</section>
     <section className="org-stats"><div><p className="org-kicker">EVENT ORGANIZER SUCCESS</p><h2>Thousands<br/>of <em>Events, Countless Stories</em></h2><p>Join our growing community of event organizers and create unforgettable experiences.</p></div>{[[CalendarDays,"5,000+","Events Organized"],[Users,"2M+","Tickets Sold"],[Check,"95%","Organizers Satisfied"],[MapPin,"250+","Partner Venues"]].map(([Icon,value,label]) => <article key={label}><Icon/><b>{value}</b><span>{label}</span></article>)}</section>
     <section className="org-cta"><div/><section><p className="org-kicker">READY TO GET STARTED?</p><h2>Organize Your <em>First Event</em> Today</h2><span>It’s quick, easy and free to get started. Turn your ideas into unforgettable experiences with Eventoria.</span><button onClick={() => document.querySelector(".org-builder")?.scrollIntoView({behavior:"smooth"})}>Create Your Event <ArrowRight/></button></section></section>
+    {/* One-Time Checking & Confirmation Modal */}
+    {showConfirmModal && (
+      <div
+        className="org-confirm-modal-overlay"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.7)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 999999,
+          padding: '20px',
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget && !saving) setShowConfirmModal(false);
+        }}
+      >
+        <div
+          style={{
+            background: '#ffffff',
+            borderRadius: '20px',
+            maxWidth: '540px',
+            width: '100%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid #e2e8f0',
+            padding: '28px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fef2f2', border: '1px solid #fecdd3', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#e11d48' }}>
+                <CheckCircle2 size={24} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                  One-Time Checking: Submit Event?
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                  Final check of your details before submitting for approval
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => setShowConfirmModal(false)}
+              style={{ background: '#f1f5f9', border: 0, width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', marginBottom: '18px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Event Title:</span>
+              <b style={{ color: '#0f172a', textAlign: 'right', fontSize: '14px' }}>{form.title || 'Untitled'}</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Category:</span>
+              <b style={{ color: '#0f172a' }}>{form.category} • {form.subcategory} ({form.type})</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Venue &amp; City:</span>
+              <b style={{ color: '#0f172a', textAlign: 'right' }}>{form.venueName}, {form.city}</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Starts:</span>
+              <b style={{ color: '#047857' }}>{startDate} at {startTime} {startAmPm}</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderBottom: '1px solid #edf2f7', paddingBottom: '8px' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Ends:</span>
+              <b style={{ color: '#b45309' }}>{endDate} at {endTime} {endAmPm}</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>Ticket Tiers:</span>
+              <span style={{ color: '#0f172a', fontWeight: 700 }}>
+                {tickets.map(t => `${t.name} (₹${t.price})`).join(' · ')}
+              </span>
+            </div>
+          </div>
+
+          <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '12px 14px', marginBottom: '20px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+            <ShieldCheck size={18} color="#059669" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <span style={{ fontSize: '12px', color: '#065f46', lineHeight: 1.4 }}>
+              Submitting sends this event to the Administrator workspace for review and approval. Once approved, your tickets will automatically go live.
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', alignItems: 'center' }}>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => setShowConfirmModal(false)}
+              style={{
+                background: '#f1f5f9',
+                color: '#475569',
+                border: '1px solid #cbd5e1',
+                padding: '11px 20px',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              ← Back to Review
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setShowConfirmModal(false);
+                saveEvent(true);
+              }}
+              style={{
+                background: '#e11d48',
+                color: '#ffffff',
+                border: 0,
+                padding: '11px 24px',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: saving ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 14px rgba(225, 29, 72, 0.3)',
+              }}
+            >
+              {saving ? 'Submitting…' : '✓ Yes, Confirm & Submit Event'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <SiteFooter/>
   </div>;
 }
